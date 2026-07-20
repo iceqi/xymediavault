@@ -2,6 +2,12 @@
 
 ## 1. 安装前准备
 
+支持以下 Linux 架构：
+
+- `amd64/x86_64`
+- `arm64/aarch64`
+- `arm/v7`
+
 确认 Docker 可用：
 
 ```bash

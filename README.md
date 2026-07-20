@@ -8,7 +8,7 @@ Docker 镜像：[`iceqi/xymediavault:latest`](https://hub.docker.com/r/iceqi/xym
 
 ### 环境要求
 
-- Linux x86_64 服务器或 NAS
+- Linux 服务器或 NAS，支持 `amd64/x86_64`、`arm64/aarch64`、`arm/v7`
 - Docker
 - Docker Compose V2，或独立的 `docker-compose`
 - 使用 FUSE 时，宿主机需要提供 `/dev/fuse` 并允许共享挂载
