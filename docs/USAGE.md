@@ -27,22 +27,22 @@ docker-compose version
 下载安装脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o /tmp/xymediavault-install.sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
 ```
 
 执行：
 
 ```bash
-sh /tmp/xymediavault-install.sh
+sh install.sh
 ```
 
-脚本必须在交互式终端中执行，因为所有部署参数都会逐项确认。
+脚本必须在交互式终端中执行，因为所有部署参数都会逐项确认。安装目录留空时使用当前执行目录；也可以在提示中输入绝对路径或相对路径，或提前设置 `INSTALL_DIR`。
 
 ### 安装参数
 
 | 参数 | 说明 | 建议值 |
 | --- | --- | --- |
-| `INSTALL_DIR` | 配置、数据库和小雅文件目录 | `/opt/xymediavault` |
+| `INSTALL_DIR` | 配置、数据库和小雅文件目录 | 执行脚本时的当前目录 |
 | `IMAGE` | XyMediaVault Docker 镜像 | `iceqi/xymediavault:latest` |
 | `PUBLIC_HOST` | 用户访问服务时使用的 IP 或域名 | 自动检测服务器 IP |
 | `API_PORT` | 管理后台端口 | `18080` |
@@ -62,7 +62,7 @@ PUBLIC_HOST=192.168.1.10 \
 API_PORT=18080 \
 WEBDAV_PORT=18081 \
 ENABLE_FUSE=false \
-sh /tmp/xymediavault-install.sh
+sh install.sh
 ```
 
 ## 3. 首次登录与小雅初始化
@@ -140,8 +140,8 @@ FUSE 依赖：
 重新下载并执行最新脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o /tmp/xymediavault-install.sh
-INSTALL_DIR=/opt/xymediavault sh /tmp/xymediavault-install.sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
+INSTALL_DIR=/opt/xymediavault sh install.sh
 ```
 
 脚本检测到安装目录下存在 `docker-compose.yml` 后会进入更新流程。配置、数据库和小雅授权文件会被保留。
@@ -236,4 +236,3 @@ umount -l /opt/xymediavault/mnt/xymediavault
 ### 小雅无法使用
 
 先检查小雅容器状态和日志，再确认普通 Token、Open Token 和转存目录 ID 均已保存。授权文件为空时，重新登录管理后台完成初始化扫码。
-

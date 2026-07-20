@@ -3,6 +3,7 @@ set -eu
 
 # XyMediaVault 一键部署脚本。
 # 示例：
+#   curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
 #   sh scripts/install.sh
 # 所有部署参数都会在安装时逐项询问，环境变量只用于修改提示中的建议值。
 
@@ -65,7 +66,12 @@ fi
 echo "XyMediaVault 交互式安装/更新"
 echo
 
-INSTALL_DIR="$(prompt_value "安装目录" "${INSTALL_DIR:-/opt/xymediavault}")"
+START_DIR="$(pwd)"
+INSTALL_DIR="$(prompt_value "安装目录" "${INSTALL_DIR:-$START_DIR}")"
+case "$INSTALL_DIR" in
+  /*) ;;
+  *) INSTALL_DIR="$START_DIR/$INSTALL_DIR" ;;
+esac
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "未找到 docker 命令，请先安装 Docker。" >&2

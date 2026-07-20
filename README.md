@@ -18,17 +18,17 @@ Docker 镜像：[`iceqi/xymediavault:latest`](https://hub.docker.com/r/iceqi/xym
 在服务器终端中运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o /tmp/xymediavault-install.sh
-sh /tmp/xymediavault-install.sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
+sh install.sh
 ```
 
-安装脚本会逐项询问安装目录、访问地址、端口、FUSE 和镜像拉取方式。直接按回车即可使用建议值。
+安装脚本会逐项询问安装目录、访问地址、端口、FUSE 和镜像拉取方式。安装目录直接按回车时，默认使用执行脚本时的当前目录；输入其他目录则安装到指定位置。
 
 默认配置：
 
 | 项目 | 默认值 |
 | --- | --- |
-| 安装目录 | `/opt/xymediavault` |
+| 安装目录 | 执行脚本时的当前目录 |
 | Docker 镜像 | `iceqi/xymediavault:latest` |
 | 管理后台 | `http://服务器IP:18080` |
 | WebDAV | `http://服务器IP:18081/dav` |
@@ -46,10 +46,10 @@ sh /tmp/xymediavault-install.sh
 4. 保留现有配置和数据并重建容器。
 5. 在服务启动时自动执行数据库迁移。
 
-默认安装目录不是 `/opt/xymediavault` 时，可以先设置建议值：
+在安装目录以外的位置执行更新时，可以通过 `INSTALL_DIR` 指定已有安装目录：
 
 ```bash
-INSTALL_DIR=/你的安装目录 sh /tmp/xymediavault-install.sh
+INSTALL_DIR=/你的安装目录 sh install.sh
 ```
 
 ## 首次使用
@@ -74,7 +74,7 @@ INSTALL_DIR=/你的安装目录 sh /tmp/xymediavault-install.sh
 
 ## 数据与安全
 
-运行数据默认保存在安装目录：
+运行数据保存在用户选择的安装目录。以下以 `/opt/xymediavault` 为例：
 
 ```text
 /opt/xymediavault/config.yaml
@@ -100,4 +100,3 @@ INSTALL_DIR=/你的安装目录 sh /tmp/xymediavault-install.sh
     <td><img src="assets/donation/alipay.jpg" alt="支付宝打赏二维码" width="260"></td>
   </tr>
 </table>
-
