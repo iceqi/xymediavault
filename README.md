@@ -36,6 +36,14 @@ sh install.sh
 | 小雅管理端口 | `2345` |
 | 小雅代理端口 | `2346` |
 
+安装脚本会读取 Docker daemon 的实际架构，目前自动支持：
+
+- `linux/amd64`
+- `linux/arm64`
+- `linux/arm/v7`
+
+Docker 会从 `iceqi/xymediavault:latest` 的多架构 manifest 中自动拉取匹配镜像，不需要手动修改镜像名称或在 Compose 中设置 `platform`。如果本地同名镜像的架构不匹配，脚本会重新拉取正确架构。
+
 ## 更新
 
 安装和更新使用同一个脚本。再次运行一键安装命令并选择更新，脚本会：

@@ -87,6 +87,39 @@ else
   exit 1
 fi
 
+RAW_HOST_ARCH="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)"
+if [ -z "$RAW_HOST_ARCH" ]; then
+  echo "无法读取 Docker 运行架构，请确认 Docker 服务已经启动。" >&2
+  exit 1
+fi
+
+case "$RAW_HOST_ARCH" in
+  amd64 | x86_64)
+    HOST_ARCH="amd64"
+    TARGET_PLATFORM="linux/amd64"
+    ;;
+  arm64 | aarch64)
+    HOST_ARCH="arm64"
+    TARGET_PLATFORM="linux/arm64"
+    ;;
+  arm | armv7 | armv7l)
+    HOST_ARCH="arm"
+    TARGET_PLATFORM="linux/arm/v7"
+    ;;
+  *)
+    echo "当前架构暂不支持：$RAW_HOST_ARCH；支持的平台为 linux/amd64、linux/arm64、linux/arm/v7。" >&2
+    exit 1
+    ;;
+esac
+
+image_is_for_host() {
+  image_arch="$(docker image inspect --format '{{.Architecture}}' "$1" 2>/dev/null || true)"
+  [ "$image_arch" = "$HOST_ARCH" ]
+}
+
+echo "检测到 Docker 目标架构：$TARGET_PLATFORM"
+echo
+
 fuse_mount_present() {
   [ "$(findmnt -T "$1" -n -o FSTYPE 2>/dev/null || true)" = "fuse.xymediavault" ]
 }
@@ -175,6 +208,7 @@ FORCE_PULL="$(prompt_bool "强制从远端拉取镜像" "${FORCE_PULL:-false}")"
 echo
 echo "安装参数确认："
 echo "  Docker 镜像：$IMAGE"
+echo "  目标架构：$TARGET_PLATFORM"
 echo "  安装目录：$INSTALL_DIR"
 echo "  服务器访问地址：$PUBLIC_HOST"
 echo "  管理后台端口：$API_PORT"
@@ -291,22 +325,22 @@ COMPOSE
 
 echo "准备启动服务..."
 
-# 本地已有指定标签时直接复用，避免网络较慢或 DockerHub 暂时不可用导致安装失败。
+# 本地已有同架构标签时直接复用；架构不匹配时重新拉取 DockerHub 的对应镜像。
 if [ "$FORCE_PULL" = "true" ]; then
   echo "强制拉取镜像：$IMAGE"
   $COMPOSE pull
 else
-  if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    echo "检测到本地镜像：$IMAGE，跳过 XyMediaVault 拉取。"
+  if image_is_for_host "$IMAGE"; then
+    echo "检测到本地镜像：$IMAGE（$TARGET_PLATFORM），跳过 XyMediaVault 拉取。"
   else
-    echo "本地没有镜像，开始拉取：$IMAGE"
+    echo "本地没有匹配 $TARGET_PLATFORM 的镜像，开始拉取：$IMAGE"
     $COMPOSE pull xymediavault
   fi
 
-  if docker image inspect xiaoyaliu/alist:latest >/dev/null 2>&1; then
-    echo "检测到本地镜像：xiaoyaliu/alist:latest，跳过小雅拉取。"
+  if image_is_for_host xiaoyaliu/alist:latest; then
+    echo "检测到本地镜像：xiaoyaliu/alist:latest（$TARGET_PLATFORM），跳过小雅拉取。"
   else
-    echo "本地没有小雅镜像，开始拉取。"
+    echo "本地没有匹配 $TARGET_PLATFORM 的小雅镜像，开始拉取。"
     $COMPOSE pull xiaoya-alist
   fi
 fi

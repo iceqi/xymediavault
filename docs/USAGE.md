@@ -54,6 +54,8 @@ sh install.sh
 | `FUSE_DIRECTORY_MODE` | FUSE 目录模式 | `original` |
 | `FORCE_PULL` | 是否忽略本地镜像并强制拉取 | `false` |
 
+脚本会自动识别 Docker 的运行架构，目前支持 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7`。Docker 会从同一个 `iceqi/xymediavault:latest` 标签选择正确镜像，不需要用户手动指定架构。
+
 环境变量只修改交互提示中的建议值，脚本仍会要求用户确认。例如：
 
 ```bash
