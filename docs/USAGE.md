@@ -221,6 +221,10 @@ docker pull iceqi/xymediavault:latest
 
 重新执行安装脚本，在交互步骤中修改对应的宿主机端口。不要修改容器内部的 `8080` 和 `8081`。
 
+### 中文目录提示 `project name must not be empty`
+
+新版安装脚本会固定使用 `xymediavault` 作为 Compose 项目名，中文、空格或特殊字符目录均可正常安装。遇到该错误时，重新执行最新的一键安装命令即可。
+
 ### 更新时卡在 FUSE 挂载
 
 安装脚本会先停止 XyMediaVault 并尝试清理旧挂载。如果仍然失败，可以执行：

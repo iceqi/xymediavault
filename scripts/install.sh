@@ -86,6 +86,10 @@ else
   exit 1
 fi
 
+# Compose 默认从目录名生成项目名；纯中文目录会被规范化为空字符串。
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-xymediavault}"
+export COMPOSE_PROJECT_NAME
+
 RAW_HOST_ARCH="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)"
 if [ -z "$RAW_HOST_ARCH" ]; then
   echo "无法读取 Docker 运行架构，请确认 Docker 服务已经启动。" >&2
