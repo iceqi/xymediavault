@@ -18,8 +18,7 @@ Docker 镜像：[`iceqi/xymediavault:latest`](https://hub.docker.com/r/iceqi/xym
 在服务器终端中运行：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
-sh install.sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
 ```
 
 安装脚本会逐项询问安装目录、访问地址、端口、FUSE 和镜像拉取方式。安装目录直接按回车时，默认使用执行脚本时的当前目录；输入其他目录则安装到指定位置。

@@ -3,8 +3,7 @@ set -eu
 
 # XyMediaVault 一键部署脚本。
 # 示例：
-#   curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
-#   sh scripts/install.sh
+#   curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
 # 所有部署参数都会在安装时逐项询问，环境变量只用于修改提示中的建议值。
 
 prompt_value() {

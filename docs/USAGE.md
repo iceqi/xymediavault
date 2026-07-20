@@ -24,15 +24,16 @@ docker-compose version
 
 ## 2. 一键安装
 
-下载安装脚本：
+直接执行一键安装：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+```
+
+如果希望先检查脚本内容，也可以下载后再执行：
 
 ```bash
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
-```
-
-执行：
-
-```bash
 sh install.sh
 ```
 
@@ -142,8 +143,7 @@ FUSE 依赖：
 重新下载并执行最新脚本：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
-INSTALL_DIR=/opt/xymediavault sh install.sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | INSTALL_DIR=/opt/xymediavault sh
 ```
 
 脚本检测到安装目录下存在 `docker-compose.yml` 后会进入更新流程。配置、数据库和小雅授权文件会被保留。
