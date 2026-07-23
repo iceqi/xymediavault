@@ -26,7 +26,7 @@ docker compose version
 docker-compose version
 ```
 
-建议提前放行需要使用的端口。默认管理后台为 `18080`，WebDAV 为 `18081`，小雅 Alist 为 `5678`，小雅管理和代理端口为 `2345`、`2346`。
+建议提前放行需要使用的端口。默认管理后台为 `18080`，WebDAV 为 `18081`，TVBox 为 `18082`，小雅 Alist 为 `5678`，小雅管理和代理端口为 `2345`、`2346`。
 
 ## 2. 一键安装
 
@@ -54,6 +54,7 @@ sh install.sh
 | `PUBLIC_HOST` | 用户访问服务时使用的 IP 或域名 | 自动检测服务器 IP |
 | `API_PORT` | 管理后台端口 | `18080` |
 | `WEBDAV_PORT` | WebDAV 端口 | `18081` |
+| `TVBOX_PORT` | TVBox 公共服务端口 | `18082` |
 | `XIAOYA_PORT` | 小雅 Alist 端口 | `5678` |
 | `XIAOYA_ADMIN_PORT` | 小雅管理端口 | `2345` |
 | `XIAOYA_PROXY_PORT` | 小雅代理端口 | `2346` |
@@ -70,6 +71,7 @@ INSTALL_DIR=/opt/xymediavault \
 PUBLIC_HOST=192.168.1.10 \
 API_PORT=18080 \
 WEBDAV_PORT=18081 \
+TVBOX_PORT=18082 \
 ENABLE_FUSE=false \
 sh install.sh
 ```
@@ -225,7 +227,7 @@ docker pull iceqi/xymediavault:latest
 
 ### 端口被占用
 
-重新执行安装脚本，在交互步骤中修改对应的宿主机端口。不要修改容器内部的 `8080` 和 `8081`。
+重新执行安装脚本，在交互步骤中修改对应的宿主机端口。不要修改容器内部的 `8080`、`8081` 和 `8082`。
 
 ### 中文目录提示 `project name must not be empty`
 

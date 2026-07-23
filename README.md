@@ -31,6 +31,7 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediav
 | Docker 镜像 | `iceqi/xymediavault:latest` |
 | 管理后台 | `http://服务器IP:18080` |
 | WebDAV | `http://服务器IP:18081/dav` |
+| TVBox | `http://服务器IP:18082` |
 | 小雅 Alist | `http://服务器IP:5678` |
 | 小雅管理端口 | `2345` |
 | 小雅代理端口 | `2346` |
@@ -76,6 +77,16 @@ INSTALL_DIR=/你的安装目录 sh install.sh
 - `organized`：只展示已经扫描并缓存的整理目录，不与远程目录混合。
 - WebDAV 账号可以单独选择目录模式。
 - FUSE 模式需要宿主机支持 `/dev/fuse`、`SYS_ADMIN` 和 `rshared` 挂载传播。
+
+## TVBox
+
+TVBox 使用独立公共端口 `18082`，管理页面仍通过 `18080` 访问。在管理后台“TVBox 服务”中创建用户和设备令牌后，可复制完整订阅地址：
+
+```text
+http://服务器IP:18082/api/tvbox/config/设备令牌
+```
+
+TVBox 公共端口只提供健康检查、订阅配置和 JSON CMS，不暴露管理接口。旧设备令牌无法恢复明文时，可在设备令牌窗口重置后重新复制地址。
 
 详细的安装参数、日常维护、备份和故障排查请阅读：[使用文档](docs/USAGE.md)。
 
