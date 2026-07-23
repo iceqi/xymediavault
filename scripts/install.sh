@@ -71,6 +71,8 @@ case "$INSTALL_DIR" in
   /*) ;;
   *) INSTALL_DIR="$START_DIR/$INSTALL_DIR" ;;
 esac
+FUSE_HOST_PATH="$INSTALL_DIR/mnt/xymediavault"
+TVBOX_PORT="${TVBOX_PORT:-18082}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "未找到 docker 命令，请先安装 Docker。" >&2
@@ -90,22 +92,47 @@ fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-xymediavault}"
 export COMPOSE_PROJECT_NAME
 
-RAW_HOST_ARCH="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)"
+DOCKER_INFO_ERROR="$(mktemp "${TMPDIR:-/tmp}/xymediavault-docker-info.XXXXXX")"
+if ! docker info >/dev/null 2>"$DOCKER_INFO_ERROR"; then
+  echo "无法连接 Docker 服务。" >&2
+  echo "请确认 Docker 已启动，并使用有 Docker 套接字权限的账号执行安装命令。" >&2
+  if [ -s "$DOCKER_INFO_ERROR" ]; then
+    echo "Docker 返回的错误：" >&2
+    sed 's/^/  /' "$DOCKER_INFO_ERROR" >&2
+  fi
+  rm -f "$DOCKER_INFO_ERROR"
+  exit 1
+fi
+rm -f "$DOCKER_INFO_ERROR"
+
+detect_docker_arch() {
+  detected_arch="$(docker version --format '{{.Server.Arch}}' 2>/dev/null || true)"
+  case "$detected_arch" in
+    "" | "<no value>") detected_arch="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)" ;;
+  esac
+  case "$detected_arch" in
+    "" | "<no value>") detected_arch="$(uname -m 2>/dev/null || true)" ;;
+  esac
+  printf "%s\n" "$detected_arch" | awk 'NF { print tolower($1); exit }'
+}
+
+RAW_HOST_ARCH="$(detect_docker_arch)"
 if [ -z "$RAW_HOST_ARCH" ]; then
-  echo "无法读取 Docker 运行架构，请确认 Docker 服务已经启动。" >&2
+  echo "Docker 服务可以访问，但无法识别运行架构。" >&2
+  echo "请反馈以下命令输出：docker version、docker info、uname -m。" >&2
   exit 1
 fi
 
 case "$RAW_HOST_ARCH" in
-  amd64 | x86_64)
+  amd64 | x86_64 | linux/amd64)
     HOST_ARCH="amd64"
     TARGET_PLATFORM="linux/amd64"
     ;;
-  arm64 | aarch64)
+  arm64 | aarch64 | linux/arm64)
     HOST_ARCH="arm64"
     TARGET_PLATFORM="linux/arm64"
     ;;
-  arm | armv7 | armv7l)
+  arm | armv7 | armv7l | armhf | linux/arm/v7)
     HOST_ARCH="arm"
     TARGET_PLATFORM="linux/arm/v7"
     ;;
@@ -155,6 +182,88 @@ cleanup_fuse_mount() {
   return 1
 }
 
+ensure_tvbox_compose_port() {
+  compose_file="$1"
+  if grep -Eq "8082[[:space:]\"']*$" "$compose_file"; then
+    return 0
+  fi
+
+  temporary_compose="$(mktemp "${TMPDIR:-/tmp}/xymediavault-compose.XXXXXX")"
+  if ! awk -v mapping="${TVBOX_PORT}:8082" '
+    BEGIN { in_service = 0; in_ports = 0; inserted = 0 }
+    in_ports && $0 !~ /^      - / {
+      print "      - \"" mapping "\""
+      in_ports = 0
+      inserted = 1
+    }
+    {
+      print
+      if ($0 ~ /^  xymediavault:[[:space:]]*$/) {
+        in_service = 1
+      } else if (in_service && $0 ~ /^  [^ ]/) {
+        in_service = 0
+      }
+      if (in_service && $0 ~ /^    ports:[[:space:]]*$/) {
+        in_ports = 1
+      }
+    }
+    END {
+      if (in_ports) {
+        print "      - \"" mapping "\""
+        inserted = 1
+      }
+      if (!inserted) exit 42
+    }
+  ' "$compose_file" >"$temporary_compose"; then
+    rm -f "$temporary_compose"
+    echo "无法在 $compose_file 的 xymediavault.ports 中加入 TVBox 端口。" >&2
+    return 1
+  fi
+  mv "$temporary_compose" "$compose_file"
+}
+
+ensure_tvbox_runtime_config() {
+  config_file="$1"
+  [ -f "$config_file" ] || return 0
+
+  temporary_config="$(mktemp "${TMPDIR:-/tmp}/xymediavault-config.XXXXXX")"
+  if ! awk -v public_port="$TVBOX_PORT" '
+    BEGIN { in_tvbox = 0; found = 0; inserted = 0 }
+    in_tvbox && $0 ~ /^[^[:space:]#]/ {
+      if (!inserted) print "  public_port: " public_port
+      in_tvbox = 0
+      inserted = 1
+    }
+    {
+      print
+      if ($0 ~ /^tvbox:[[:space:]]*$/) {
+        in_tvbox = 1
+        found = 1
+      } else if (in_tvbox && $0 ~ /^  public_port:[[:space:]]*/) {
+        inserted = 1
+      }
+    }
+    END {
+      if (in_tvbox && !inserted) print "  public_port: " public_port
+      if (!found) {
+        print ""
+        print "tvbox:"
+        print "  enabled: true"
+        print "  listen_addr: 0.0.0.0"
+        print "  port: 8082"
+        print "  public_port: " public_port
+        print "  public_url: \"\""
+        print "  token_key_file: /app/data/tvbox-token.key"
+      }
+    }
+  ' "$config_file" >"$temporary_config"; then
+    rm -f "$temporary_config"
+    echo "更新 $config_file 的 TVBox 配置失败。" >&2
+    return 1
+  fi
+  mv "$temporary_config" "$config_file"
+}
+
 if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   echo "检测到已有 XyMediaVault 安装：$INSTALL_DIR"
   CONTINUE_UPDATE="$(prompt_bool "更新现有安装" "true")"
@@ -163,13 +272,24 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     exit 0
   fi
 
-  mkdir -p "$INSTALL_DIR/mnt/xymediavault"
+  mkdir -p "$FUSE_HOST_PATH"
   cd "$INSTALL_DIR"
 
   echo "停止旧 XyMediaVault 容器..."
   $COMPOSE stop xymediavault >/dev/null 2>&1 || true
-  cleanup_fuse_mount "$INSTALL_DIR/mnt/xymediavault"
-  mkdir -p "$INSTALL_DIR/mnt/xymediavault"
+  cleanup_fuse_mount "$FUSE_HOST_PATH"
+  cleanup_fuse_mount "/mnt/xymediavault"
+  mkdir -p "$FUSE_HOST_PATH"
+
+  # 使用安装目录下的宿主机挂载点，并将其绝对路径传给后台页面展示。
+  sed -i 's#^\([[:space:]]*-[[:space:]]*\)/mnt/xymediavault:/mnt/xymediavault:rshared$#\1./mnt/xymediavault:/mnt/xymediavault:rshared#' docker-compose.yml
+  if grep -q 'XYMEDIAVAULT_FUSE_HOST_PATH:' docker-compose.yml; then
+    sed -i "s#^\([[:space:]]*XYMEDIAVAULT_FUSE_HOST_PATH:[[:space:]]*\).*$#\1\"$FUSE_HOST_PATH\"#" docker-compose.yml
+  else
+    sed -i "/container_name: xymediavault/a\\    environment:\n      XYMEDIAVAULT_FUSE_HOST_PATH: \"$FUSE_HOST_PATH\"" docker-compose.yml
+  fi
+  ensure_tvbox_compose_port docker-compose.yml
+  ensure_tvbox_runtime_config config.yaml
 
   if grep -q '^[[:space:]]*build:' docker-compose.yml; then
     echo "检测到本地构建模式，重新构建 XyMediaVault 镜像..."
@@ -201,6 +321,7 @@ IMAGE="$(prompt_value "Docker 镜像" "${IMAGE:-iceqi/xymediavault:latest}")"
 PUBLIC_HOST="$(prompt_value "服务器访问 IP 或域名" "${PUBLIC_HOST:-$DETECTED_HOST}")"
 API_PORT="$(prompt_value "管理后台端口" "${API_PORT:-18080}")"
 WEBDAV_PORT="$(prompt_value "WebDAV 端口" "${WEBDAV_PORT:-18081}")"
+TVBOX_PORT="$(prompt_value "TVBox 服务端口" "${TVBOX_PORT:-18082}")"
 XIAOYA_PORT="$(prompt_value "小雅 Alist 端口" "${XIAOYA_PORT:-5678}")"
 XIAOYA_ADMIN_PORT="$(prompt_value "小雅管理端口" "${XIAOYA_ADMIN_PORT:-2345}")"
 XIAOYA_PROXY_PORT="$(prompt_value "小雅代理端口" "${XIAOYA_PROXY_PORT:-2346}")"
@@ -216,6 +337,7 @@ echo "  安装目录：$INSTALL_DIR"
 echo "  服务器访问地址：$PUBLIC_HOST"
 echo "  管理后台端口：$API_PORT"
 echo "  WebDAV 端口：$WEBDAV_PORT"
+echo "  TVBox 服务端口：$TVBOX_PORT"
 echo "  小雅 Alist 端口：$XIAOYA_PORT"
 echo "  小雅管理端口：$XIAOYA_ADMIN_PORT"
 echo "  小雅代理端口：$XIAOYA_PROXY_PORT"
@@ -230,12 +352,12 @@ if [ "$CONTINUE_INSTALL" != "true" ]; then
   exit 0
 fi
 
-mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$INSTALL_DIR/mnt/xymediavault"
+mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$FUSE_HOST_PATH"
 cd "$INSTALL_DIR"
 
 # 旧版本异常退出可能留下 FUSE 坏挂载，确认清理完成后再交给 Docker 做 bind mount。
-cleanup_fuse_mount "$INSTALL_DIR/mnt/xymediavault"
-mkdir -p "$INSTALL_DIR/mnt/xymediavault"
+cleanup_fuse_mount "$FUSE_HOST_PATH"
+mkdir -p "$FUSE_HOST_PATH"
 
 WRITE_CONFIG="true"
 if [ -f config.yaml ]; then
@@ -263,6 +385,14 @@ webdav:
   base_path: /dav
   read_only: true
   directory_mode: original
+
+tvbox:
+  enabled: true
+  listen_addr: 0.0.0.0
+  port: 8082
+  public_port: ${TVBOX_PORT}
+  public_url: http://${PUBLIC_HOST}:${TVBOX_PORT}
+  token_key_file: /app/data/tvbox-token.key
 
 fuse:
   enabled: ${ENABLE_FUSE}
@@ -299,14 +429,17 @@ services:
   xymediavault:
     image: ${IMAGE}
     container_name: xymediavault
+    environment:
+      XYMEDIAVAULT_FUSE_HOST_PATH: "${FUSE_HOST_PATH}"
     ports:
       - "${API_PORT}:8080"
       - "${WEBDAV_PORT}:8081"
+      - "${TVBOX_PORT}:8082"
     depends_on:
       - xiaoya-alist${FUSE_BLOCK}
     volumes:
       - ./data:/app/data
-      - ./mnt/xymediavault:/mnt/xymediavault:rshared
+      - ${FUSE_HOST_PATH}:/mnt/xymediavault:rshared
       - ./xiaoya:/app/xiaoya
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
@@ -354,8 +487,9 @@ echo
 echo "部署完成。"
 echo "管理后台：http://${PUBLIC_HOST}:${API_PORT}"
 echo "WebDAV：http://${PUBLIC_HOST}:${WEBDAV_PORT}/dav"
+echo "TVBox：http://${PUBLIC_HOST}:${TVBOX_PORT}"
 echo "小雅 Alist：http://${PUBLIC_HOST}:${XIAOYA_PORT}"
 echo "安装目录：${INSTALL_DIR}"
 if [ "$ENABLE_FUSE" = "true" ]; then
-  echo "FUSE 宿主机目录：${INSTALL_DIR}/mnt/xymediavault"
+  echo "FUSE 宿主机目录：${FUSE_HOST_PATH}"
 fi
