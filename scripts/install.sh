@@ -73,6 +73,7 @@ case "$INSTALL_DIR" in
 esac
 FUSE_HOST_PATH="$INSTALL_DIR/mnt/xymediavault"
 TVBOX_PORT="${TVBOX_PORT:-18082}"
+WEBDAV_PORT="${WEBDAV_PORT:-18081}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "未找到 docker 命令，请先安装 Docker。" >&2
@@ -264,6 +265,56 @@ ensure_tvbox_runtime_config() {
   mv "$temporary_config" "$config_file"
 }
 
+ensure_webdav_runtime_config() {
+  config_file="$1"
+  [ -f "$config_file" ] || return 0
+
+  temporary_config="$(mktemp "${TMPDIR:-/tmp}/xymediavault-config.XXXXXX")"
+  if ! awk -v public_port="$WEBDAV_PORT" '
+    BEGIN { in_webdav = 0; found = 0; inserted = 0 }
+    in_webdav && $0 ~ /^[^[:space:]#]/ {
+      if (!inserted) print "  public_port: " public_port
+      in_webdav = 0
+      inserted = 1
+    }
+    {
+      if (in_webdav && $0 ~ /^  public_port:[[:space:]]*/) {
+        print "  public_port: " public_port
+        inserted = 1
+        next
+      }
+      print
+      if ($0 ~ /^webdav:[[:space:]]*$/) {
+        in_webdav = 1
+        found = 1
+      }
+    }
+    END {
+      if (in_webdav && !inserted) print "  public_port: " public_port
+      if (!found) {
+        print ""
+        print "webdav:"
+        print "  enabled: true"
+        print "  listen_addr: 0.0.0.0"
+        print "  port: 8081"
+        print "  public_port: " public_port
+        print "  base_path: /dav"
+        print "  read_only: true"
+      }
+    }
+  ' "$config_file" >"$temporary_config"; then
+    rm -f "$temporary_config"
+    echo "更新 $config_file 的 WebDAV 配置失败。" >&2
+    return 1
+  fi
+  mv "$temporary_config" "$config_file"
+}
+
+detect_webdav_host_port() {
+  compose_file="$1"
+  sed -nE 's/^[[:space:]]*-[[:space:]]*"?([0-9]+):8081"?[[:space:]]*$/\1/p' "$compose_file" | tail -n 1
+}
+
 if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   echo "检测到已有 XyMediaVault 安装：$INSTALL_DIR"
   CONTINUE_UPDATE="$(prompt_bool "更新现有安装" "true")"
@@ -274,6 +325,12 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
 
   mkdir -p "$FUSE_HOST_PATH"
   cd "$INSTALL_DIR"
+  if [ -z "${WEBDAV_PORT:-}" ] || [ "$WEBDAV_PORT" = "18081" ]; then
+    detected_webdav_port="$(detect_webdav_host_port docker-compose.yml || true)"
+    if [ -n "$detected_webdav_port" ]; then
+      WEBDAV_PORT="$detected_webdav_port"
+    fi
+  fi
 
   echo "停止旧 XyMediaVault 容器..."
   $COMPOSE stop xymediavault >/dev/null 2>&1 || true
@@ -288,8 +345,14 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   else
     sed -i "/container_name: xymediavault/a\\    environment:\n      XYMEDIAVAULT_FUSE_HOST_PATH: \"$FUSE_HOST_PATH\"" docker-compose.yml
   fi
+  if grep -q 'XYMEDIAVAULT_XIAOYA_HOST_PATH:' docker-compose.yml; then
+    sed -i "s#^\([[:space:]]*XYMEDIAVAULT_XIAOYA_HOST_PATH:[[:space:]]*\).*$#\1\"$INSTALL_DIR/xiaoya\"#" docker-compose.yml
+  else
+    sed -i "/XYMEDIAVAULT_FUSE_HOST_PATH:/a\      XYMEDIAVAULT_XIAOYA_HOST_PATH: \"$INSTALL_DIR/xiaoya\"" docker-compose.yml
+  fi
   ensure_tvbox_compose_port docker-compose.yml
   ensure_tvbox_runtime_config config.yaml
+  ensure_webdav_runtime_config config.yaml
 
   if grep -q '^[[:space:]]*build:' docker-compose.yml; then
     echo "检测到本地构建模式，重新构建 XyMediaVault 镜像..."
@@ -326,7 +389,6 @@ XIAOYA_PORT="$(prompt_value "小雅 Alist 端口" "${XIAOYA_PORT:-5678}")"
 XIAOYA_ADMIN_PORT="$(prompt_value "小雅管理端口" "${XIAOYA_ADMIN_PORT:-2345}")"
 XIAOYA_PROXY_PORT="$(prompt_value "小雅代理端口" "${XIAOYA_PROXY_PORT:-2346}")"
 ENABLE_FUSE="$(prompt_bool "启用 FUSE 虚拟目录" "${ENABLE_FUSE:-true}")"
-FUSE_DIRECTORY_MODE="$(prompt_value "FUSE 目录模式 original/organized" "${FUSE_DIRECTORY_MODE:-original}")"
 FORCE_PULL="$(prompt_bool "强制从远端拉取镜像" "${FORCE_PULL:-false}")"
 
 echo
@@ -342,7 +404,6 @@ echo "  小雅 Alist 端口：$XIAOYA_PORT"
 echo "  小雅管理端口：$XIAOYA_ADMIN_PORT"
 echo "  小雅代理端口：$XIAOYA_PROXY_PORT"
 echo "  FUSE：$ENABLE_FUSE"
-echo "  FUSE 目录模式：$FUSE_DIRECTORY_MODE"
 echo "  强制拉取：$FORCE_PULL"
 echo
 
@@ -382,9 +443,9 @@ webdav:
   enabled: true
   listen_addr: 0.0.0.0
   port: 8081
+  public_port: ${WEBDAV_PORT}
   base_path: /dav
   read_only: true
-  directory_mode: original
 
 tvbox:
   enabled: true
@@ -397,7 +458,6 @@ tvbox:
 fuse:
   enabled: ${ENABLE_FUSE}
   mount_path: /mnt/xymediavault
-  directory_mode: ${FUSE_DIRECTORY_MODE}
 
 xiaoya:
   config_dir: /app/xiaoya
@@ -431,6 +491,7 @@ services:
     container_name: xymediavault
     environment:
       XYMEDIAVAULT_FUSE_HOST_PATH: "${FUSE_HOST_PATH}"
+      XYMEDIAVAULT_XIAOYA_HOST_PATH: "${INSTALL_DIR}/xiaoya"
     ports:
       - "${API_PORT}:8080"
       - "${WEBDAV_PORT}:8081"
