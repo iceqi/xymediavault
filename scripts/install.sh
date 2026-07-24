@@ -72,8 +72,10 @@ case "$INSTALL_DIR" in
   *) INSTALL_DIR="$START_DIR/$INSTALL_DIR" ;;
 esac
 FUSE_HOST_PATH="$INSTALL_DIR/mnt/xymediavault"
+API_PORT="${API_PORT:-18080}"
 TVBOX_PORT="${TVBOX_PORT:-18082}"
 WEBDAV_PORT="${WEBDAV_PORT:-18081}"
+XIAOYA_PORT="${XIAOYA_PORT:-5678}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "未找到 docker 命令，请先安装 Docker。" >&2
@@ -310,10 +312,26 @@ ensure_webdav_runtime_config() {
   mv "$temporary_config" "$config_file"
 }
 
-detect_webdav_host_port() {
+detect_compose_host_port() {
   compose_file="$1"
-  sed -nE 's/^[[:space:]]*-[[:space:]]*"?([0-9]+):8081"?[[:space:]]*$/\1/p' "$compose_file" | tail -n 1
+  container_port="$2"
+  sed -nE "s/^[[:space:]]*-[[:space:]]*\"?([0-9]+):${container_port}\"?[[:space:]]*$/\1/p" "$compose_file" | tail -n 1
 }
+
+print_access_info() {
+  echo "管理页面：http://${PUBLIC_HOST}:${API_PORT}"
+  echo "WebDAV：http://${PUBLIC_HOST}:${WEBDAV_PORT}/dav"
+  echo "TVBox：http://${PUBLIC_HOST}:${TVBOX_PORT}"
+  echo "小雅 Alist：http://${PUBLIC_HOST}:${XIAOYA_PORT}"
+  echo "安装目录：${INSTALL_DIR}"
+  echo "媒体库挂载目录：${FUSE_HOST_PATH}"
+}
+
+DETECTED_HOST="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+if [ -z "$DETECTED_HOST" ]; then
+  DETECTED_HOST="127.0.0.1"
+fi
+PUBLIC_HOST="${PUBLIC_HOST:-$DETECTED_HOST}"
 
 if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   echo "检测到已有 XyMediaVault 安装：$INSTALL_DIR"
@@ -325,12 +343,14 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
 
   mkdir -p "$FUSE_HOST_PATH"
   cd "$INSTALL_DIR"
-  if [ -z "${WEBDAV_PORT:-}" ] || [ "$WEBDAV_PORT" = "18081" ]; then
-    detected_webdav_port="$(detect_webdav_host_port docker-compose.yml || true)"
-    if [ -n "$detected_webdav_port" ]; then
-      WEBDAV_PORT="$detected_webdav_port"
-    fi
-  fi
+  detected_api_port="$(detect_compose_host_port docker-compose.yml 8080 || true)"
+  detected_webdav_port="$(detect_compose_host_port docker-compose.yml 8081 || true)"
+  detected_tvbox_port="$(detect_compose_host_port docker-compose.yml 8082 || true)"
+  detected_xiaoya_port="$(detect_compose_host_port docker-compose.yml 80 || true)"
+  [ -z "$detected_api_port" ] || API_PORT="$detected_api_port"
+  [ -z "$detected_webdav_port" ] || WEBDAV_PORT="$detected_webdav_port"
+  [ -z "$detected_tvbox_port" ] || TVBOX_PORT="$detected_tvbox_port"
+  [ -z "$detected_xiaoya_port" ] || XIAOYA_PORT="$detected_xiaoya_port"
 
   echo "停止旧 XyMediaVault 容器..."
   $COMPOSE stop xymediavault >/dev/null 2>&1 || true
@@ -350,6 +370,11 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   else
     sed -i "/XYMEDIAVAULT_FUSE_HOST_PATH:/a\      XYMEDIAVAULT_XIAOYA_HOST_PATH: \"$INSTALL_DIR/xiaoya\"" docker-compose.yml
   fi
+  if grep -q '^[[:space:]]*TZ:' docker-compose.yml; then
+    sed -i 's#^\([[:space:]]*TZ:[[:space:]]*\).*$#\1"Asia/Shanghai"#' docker-compose.yml
+  else
+    sed -i '/XYMEDIAVAULT_XIAOYA_HOST_PATH:/a\      TZ: "Asia/Shanghai"' docker-compose.yml
+  fi
   ensure_tvbox_compose_port docker-compose.yml
   ensure_tvbox_runtime_config config.yaml
   ensure_webdav_runtime_config config.yaml
@@ -366,19 +391,13 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   $COMPOSE up -d --no-deps --force-recreate xymediavault
 
   echo
-  echo "更新完成。"
-  echo "安装目录：$INSTALL_DIR"
+  print_access_info
   exit 0
 fi
 
 echo "未检测到已有安装，进入首次安装配置。"
 echo "每一项都提供默认值，不输入内容直接按回车即可使用默认值。"
 echo
-
-DETECTED_HOST="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-if [ -z "$DETECTED_HOST" ]; then
-  DETECTED_HOST="127.0.0.1"
-fi
 
 IMAGE="$(prompt_value "Docker 镜像" "${IMAGE:-iceqi/xymediavault:latest}")"
 PUBLIC_HOST="$(prompt_value "服务器访问 IP 或域名" "${PUBLIC_HOST:-$DETECTED_HOST}")"
@@ -490,6 +509,7 @@ services:
     image: ${IMAGE}
     container_name: xymediavault
     environment:
+      TZ: "Asia/Shanghai"
       XYMEDIAVAULT_FUSE_HOST_PATH: "${FUSE_HOST_PATH}"
       XYMEDIAVAULT_XIAOYA_HOST_PATH: "${INSTALL_DIR}/xiaoya"
     ports:
@@ -545,12 +565,4 @@ fi
 $COMPOSE up -d
 
 echo
-echo "部署完成。"
-echo "管理后台：http://${PUBLIC_HOST}:${API_PORT}"
-echo "WebDAV：http://${PUBLIC_HOST}:${WEBDAV_PORT}/dav"
-echo "TVBox：http://${PUBLIC_HOST}:${TVBOX_PORT}"
-echo "小雅 Alist：http://${PUBLIC_HOST}:${XIAOYA_PORT}"
-echo "安装目录：${INSTALL_DIR}"
-if [ "$ENABLE_FUSE" = "true" ]; then
-  echo "FUSE 宿主机目录：${FUSE_HOST_PATH}"
-fi
+print_access_info
