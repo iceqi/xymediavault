@@ -392,27 +392,76 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   mkdir -p "$FUSE_HOST_PATH"
 
   # 使用安装目录下的宿主机挂载点，并将其绝对路径传给后台页面展示。
-  sed -i 's#^\([[:space:]]*-[[:space:]]*\)/mnt/xymediavault:/mnt/xymediavault:rshared$#\1./mnt/xymediavault:/mnt/xymediavault:rshared#' docker-compose.yml
-  if grep -q 'XYMEDIAVAULT_FUSE_HOST_PATH:' docker-compose.yml; then
-    sed -i "s#^\([[:space:]]*XYMEDIAVAULT_FUSE_HOST_PATH:[[:space:]]*\).*$#\1\"$FUSE_HOST_PATH\"#" docker-compose.yml
-  else
-    sed -i "/container_name: xymediavault/a\\    environment:\n      XYMEDIAVAULT_FUSE_HOST_PATH: \"$FUSE_HOST_PATH\"" docker-compose.yml
+  temporary_compose="$(mktemp "${TMPDIR:-/tmp}/xymediavault-compose.XXXXXX")"
+  if ! awk \
+    -v fuse_host_path="$FUSE_HOST_PATH" \
+    -v xiaoya_host_path="$INSTALL_DIR/xiaoya" \
+    -v emby_host_path="$EMBY_HOST_PATH" '
+    function yaml_quote(value) {
+      gsub(/\\/, "\\\\", value)
+      gsub(/"/, "\\\"", value)
+      return "\"" value "\""
+    }
+    function print_runtime_environment() {
+      print "      TZ: \"Asia/Shanghai\""
+      print "      XYMEDIAVAULT_FUSE_HOST_PATH: " yaml_quote(fuse_host_path)
+      print "      XYMEDIAVAULT_XIAOYA_HOST_PATH: " yaml_quote(xiaoya_host_path)
+      print "      XYMEDIAVAULT_EMBY_HOST_PATH: " yaml_quote(emby_host_path)
+    }
+    {
+      lines[NR] = $0
+    }
+    END {
+      service_start = 0
+      service_end = NR + 1
+      environment_line = 0
+      container_line = 0
+
+      for (i = 1; i <= NR; i++) {
+        if (lines[i] ~ /^  xymediavault:[[:space:]]*$/) {
+          service_start = i
+          continue
+        }
+        if (service_start && i > service_start && lines[i] ~ /^  [^[:space:]][^:]*:[[:space:]]*$/) {
+          service_end = i
+          break
+        }
+      }
+      if (!service_start) exit 42
+
+      for (i = service_start + 1; i < service_end; i++) {
+        if (lines[i] ~ /^    container_name:[[:space:]]*/) container_line = i
+        if (lines[i] ~ /^    environment:[[:space:]]*$/) environment_line = i
+      }
+
+      for (i = 1; i <= NR; i++) {
+        line = lines[i]
+        if (i > service_start && i < service_end &&
+            line ~ /^[[:space:]]*-[[:space:]]*\/mnt\/xymediavault:\/mnt\/xymediavault:rshared[[:space:]]*$/) {
+          sub(/\/mnt\/xymediavault:\/mnt\/xymediavault:rshared/, "./mnt/xymediavault:/mnt/xymediavault:rshared", line)
+        }
+
+        in_runtime_environment = environment_line && i > environment_line && i < service_end
+        if (in_runtime_environment && line ~ /^    [^[:space:]]/) in_runtime_environment = 0
+        if (in_runtime_environment && line ~ /^      (TZ|XYMEDIAVAULT_FUSE_HOST_PATH|XYMEDIAVAULT_XIAOYA_HOST_PATH|XYMEDIAVAULT_EMBY_HOST_PATH):/) {
+          continue
+        }
+
+        print line
+        if (environment_line && i == environment_line) {
+          print_runtime_environment()
+        } else if (!environment_line && ((container_line && i == container_line) || (!container_line && i == service_start))) {
+          print "    environment:"
+          print_runtime_environment()
+        }
+      }
+    }
+  ' docker-compose.yml >"$temporary_compose"; then
+    rm -f "$temporary_compose"
+    echo "更新 docker-compose.yml 的宿主机路径失败。" >&2
+    exit 1
   fi
-  if grep -q 'XYMEDIAVAULT_XIAOYA_HOST_PATH:' docker-compose.yml; then
-    sed -i "s#^\([[:space:]]*XYMEDIAVAULT_XIAOYA_HOST_PATH:[[:space:]]*\).*$#\1\"$INSTALL_DIR/xiaoya\"#" docker-compose.yml
-  else
-    sed -i "/XYMEDIAVAULT_FUSE_HOST_PATH:/a\      XYMEDIAVAULT_XIAOYA_HOST_PATH: \"$INSTALL_DIR/xiaoya\"" docker-compose.yml
-  fi
-  if grep -q 'XYMEDIAVAULT_EMBY_HOST_PATH:' docker-compose.yml; then
-    sed -i "s#^\([[:space:]]*XYMEDIAVAULT_EMBY_HOST_PATH:[[:space:]]*\).*$#\1\"$EMBY_HOST_PATH\"#" docker-compose.yml
-  else
-    sed -i "/XYMEDIAVAULT_XIAOYA_HOST_PATH:/a\      XYMEDIAVAULT_EMBY_HOST_PATH: \"$EMBY_HOST_PATH\"" docker-compose.yml
-  fi
-  if grep -q '^[[:space:]]*TZ:' docker-compose.yml; then
-    sed -i 's#^\([[:space:]]*TZ:[[:space:]]*\).*$#\1"Asia/Shanghai"#' docker-compose.yml
-  else
-    sed -i '/XYMEDIAVAULT_XIAOYA_HOST_PATH:/a\      TZ: "Asia/Shanghai"' docker-compose.yml
-  fi
+  mv "$temporary_compose" docker-compose.yml
   ensure_tvbox_compose_port docker-compose.yml
   ensure_media_mount_compose_permissions docker-compose.yml
   ensure_tvbox_runtime_config config.yaml
