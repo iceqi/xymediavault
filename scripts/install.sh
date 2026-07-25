@@ -65,8 +65,8 @@ fi
 echo "XyMediaVault 交互式安装/更新"
 echo
 
-START_DIR="$(pwd)"
-INSTALL_DIR="$(prompt_value "安装目录" "${INSTALL_DIR:-$START_DIR}")"
+START_DIR="$(pwd -P)"
+INSTALL_DIR="$(prompt_value "安装目录" "${1:-$START_DIR}")"
 case "$INSTALL_DIR" in
   /*) ;;
   *) INSTALL_DIR="$START_DIR/$INSTALL_DIR" ;;

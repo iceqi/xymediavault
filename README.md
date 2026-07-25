@@ -1,289 +1,290 @@
 # XyMediaVault
 
-XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 场景的媒体资源索引与虚拟文件系统服务。它从 HTTP Index 扫描目录及文件信息，在 SQLite 中维护统一索引，再通过 WebDAV、媒体库挂载和 TVBox 提供稳定的媒体视图。媒体服务器浏览目录时只查询本地索引，不再递归访问远程源站。
+XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 的媒体资源管理服务，提供媒体索引、WebDAV、媒体库挂载、TVBox 接口、小雅授权管理和 Emby 容器管理等能力。
 
-数据库保存目录结构、文件路径和可选元数据，不保存视频内容或完整播放 URL。STRM 文本在第一次读取时从远程源获取并缓存；NFO、海报、字幕等辅助文件仅保存索引路径，在客户端实际访问时按需从远程读取。
+> 本项目为闭源软件。公开仓库仅提供安装脚本、使用文档和必要的公开资源，不提供产品源代码、构建流程或开发文档。
 
-当前功能包含 Go 后端、SQLite 媒体索引、HTTP Index 多源故障切换、定时增量扫描、动态 STRM、只读 WebDAV、媒体库挂载、TVBox JSON CMS、Emby 容器管理和 Arco 管理后台。
+## 主要功能
 
-## 快速启动
+- 扫描媒体目录并建立本地索引，减少媒体服务器重复访问远程目录。
+- 提供只读 WebDAV，供 Emby、Jellyfin、Infuse 等客户端挂载。
+- 提供媒体库挂载目录，供宿主机上的媒体服务器直接使用。
+- 提供 TVBox JSON CMS 服务、独立用户、设备令牌和目录权限。
+- 托管小雅 Alist 的授权、状态、启停、重启和实时日志。
+- 可选安装并管理 Emby，包括更新、启停、重启和实时日志。
+- 支持多个同构索引源，源站不可用时自动切换。
+- 支持定时更新媒体索引、STRM 播放地址和可选元数据补全。
 
-后端：
+## 支持环境
 
-```bash
-go run ./cmd/xymediavault server --config config.example.yaml
-```
+- 已安装并启动 Docker。
+- 已安装 Docker Compose V2 或 `docker-compose`。
+- 支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`。
+- 使用媒体库挂载时，宿主机需要支持 FUSE、`/dev/fuse` 和共享挂载传播。
+- 建议预留管理后台、WebDAV、TVBox 和小雅 Alist 所需端口。
 
-前端：
+默认端口：
 
-```bash
-cd web/arco-admin
-npm install
-npm run dev
-```
+| 服务 | 默认端口 | 默认地址 |
+| --- | ---: | --- |
+| 管理后台 | 18080 | `http://服务器IP:18080` |
+| WebDAV | 18081 | `http://服务器IP:18081/dav` |
+| TVBox | 18082 | `http://服务器IP:18082` |
+| 小雅 Alist | 5678 | `http://服务器IP:5678` |
 
-当前后端 `server` 命令会加载配置、初始化 SQLite 数据库，并启动管理后台/API、WebDAV 和 TVBox 服务。前端静态资源可用 Vite 开发服务器调试；Docker 镜像会构建前端资源并由应用容器直接提供管理后台。
+## 一键安装
 
-## Docker 部署
-
-默认 Docker 配置：
-
-- API 端口：容器内 `8080`，默认映射到宿主机 `18080`
-- WebDAV 端口：容器内 `8081`，默认映射到宿主机 `18081`
-- TVBox 端口：容器内 `8082`，默认映射到宿主机 `18082`
-- 数据目录：`./data:/app/data`
-- 数据库：SQLite，文件为 `/app/data/xymediavault.db`
-- 媒体库挂载：默认启用，需要宿主机提供 `/dev/fuse` 和 `SYS_ADMIN`
-
-启动：
-
-```bash
-docker compose up -d --build
-```
-
-检查 Compose 配置：
-
-```bash
-docker compose config
-```
-
-如果宿主机只安装了旧版 Compose，也可以使用：
-
-```bash
-docker-compose config
-```
-
-不要提交运行生成的 `data/*.db`。MySQL/MariaDB 是后续支持目标，当前默认部署路径是 SQLite。
-
-## DockerHub 发布
-
-发布前先登录 DockerHub：
-
-```bash
-docker login
-```
-
-构建并推送镜像：
-
-```bash
-DOCKER_IMAGE=你的DockerHub用户名/xymediavault VERSION=1.0.0 sh scripts/publish-dockerhub.sh
-```
-
-发布脚本使用 Docker Buildx，默认同时构建 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7`。DockerHub 会为同一标签生成多架构 manifest，用户安装时由 Docker 自动选择与服务器匹配的镜像。
-
-如果 `VERSION` 不是 `latest`，脚本会同时推送：
-
-```text
-你的DockerHub用户名/xymediavault:1.0.0
-你的DockerHub用户名/xymediavault:latest
-```
-
-镜像构建上下文已经通过 `.dockerignore` 排除了 `data/`、`mnt/` 和 `xiaoya/`，不会把本地数据库、媒体库挂载目录、115 Cookie、阿里/夸克 token 等敏感文件打包进镜像。
-
-## 一键部署
-
-普通用户可以使用一键脚本部署。把 `IMAGE` 改成你发布到 DockerHub 的镜像名：
+先进入希望保存 XyMediaVault 数据的目录，再执行：
 
 ```bash
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
 ```
 
-脚本会进入交互式安装，逐项询问并显示建议值：
+不指定目录时，安装目录严格使用执行命令时的当前目录。脚本不会默认安装到 `/opt`，也不会读取环境中的 `INSTALL_DIR` 作为默认路径。
 
-```text
-安装目录（默认使用执行脚本时的当前目录）
-Docker 镜像
-目标架构（自动检测 linux/amd64、linux/arm64 或 linux/arm/v7）
-服务器访问 IP 或域名
-管理后台端口
-WebDAV 端口
-TVBox 服务端口
-小雅 Alist 端口
-小雅管理端口
-小雅代理端口
-是否启用媒体库挂载
-是否强制拉取镜像
-```
-
-直接按回车采用当前提示中的建议值，输入新值则覆盖该项。
-
-如果希望先检查脚本内容，也可以下载后再执行：
+例如，希望安装到当前用户的 `XyMediaVault` 目录：
 
 ```bash
-wget -O install.sh https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh
-sh install.sh
+mkdir -p "$HOME/XyMediaVault"
+cd "$HOME/XyMediaVault"
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
 ```
 
-也可以通过环境变量修改交互提示中的建议值：
+### 指定安装目录
+
+一键命令可以把目录作为第一个参数传给脚本：
 
 ```bash
-INSTALL_DIR=/opt/xymediavault \
-PUBLIC_HOST=192.168.1.10 \
-API_PORT=18080 \
-WEBDAV_PORT=18081 \
-TVBOX_PORT=18082 \
-XIAOYA_PORT=5678 \
-ENABLE_FUSE=true \
-IMAGE=iceqi/xymediavault:latest \
-sh install.sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /指定目录
 ```
 
-默认镜像是 `iceqi/xymediavault:latest`。如果本地已经存在该标签，脚本会直接复用，不再访问 DockerHub。需要强制拉取最新镜像时使用：
-
-安装脚本读取 Docker daemon 的实际架构。目前支持 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7`；本地同名镜像架构不匹配时会自动拉取正确架构，Compose 文件不需要手动设置 `platform`。
+也可以先下载脚本：
 
 ```bash
-FORCE_PULL=true sh install.sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
+sh install.sh /指定目录
 ```
 
-安装和更新使用同一个脚本。脚本会检查安装目录中是否已有 `docker-compose.yml`：不存在时进入首次安装配置；存在时自动进入更新流程，保留原有配置，只停止 XyMediaVault、清理宿主机残留的媒体库挂载、拉取或构建新镜像并重建应用容器。
+相对目录会基于当前执行目录转换为绝对路径。
 
-安装目录留空时使用执行脚本时的当前目录。如果希望安装到其他位置，可以在交互提示中输入目录，也可以通过 `INSTALL_DIR` 指定：
+### 安装选项
+
+脚本会交互询问以下内容，直接按回车使用显示的默认值：
+
+- 安装目录
+- Docker 镜像
+- 服务器访问 IP 或域名
+- 管理后台端口
+- WebDAV 端口
+- TVBox 服务端口
+- 小雅 Alist、管理和代理端口
+- 是否启用媒体库挂载
+- 是否强制拉取最新镜像
+
+脚本自动识别 Docker 服务器架构，并拉取对应的 `iceqi/xymediavault:latest` 镜像。
+
+## 更新
+
+安装和更新使用同一个脚本。在原安装目录执行一键安装命令，脚本检测到 `docker-compose.yml` 后会进入更新流程：
 
 ```bash
-INSTALL_DIR=/opt/xymediavault sh install.sh
+cd /你的/XyMediaVault/安装目录
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
 ```
 
-数据库迁移会在新容器启动时自动执行。不要直接在媒体库已挂载时使用 `docker-compose up --force-recreate`，否则旧挂载可能阻止 Docker 创建 bind mount。
+也可以在任意目录显式指定已有安装目录：
 
-脚本会自动创建：
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /你的/XyMediaVault/安装目录
+```
+
+更新过程会保留数据库、系统配置、小雅授权文件和 Emby 配置。更新前会停止 XyMediaVault，并检查媒体库目录是否存在残留 FUSE 挂载；检测到挂载时会先卸载，再重建容器并自动重新挂载。
+
+## 首次使用
+
+1. 打开 `http://服务器IP:18080`。
+2. 注册并登录管理员账号。
+3. 按首次设置窗口完成小雅普通 Token、Open Token 和转存目录配置。
+4. 转存目录默认显示 `root`，可以按实际需要修改。
+5. 配置完成后系统会重启小雅容器。
+6. 在“索引源”确认内置源可用，或添加自定义同构索引源。
+7. 在“媒体资源”选择目录并创建媒体索引任务。
+
+小雅和 Emby 页面使用 SSE 实时显示容器日志。页面打开后自动连接，断线后自动重连，不需要手动刷新。
+
+## 媒体索引
+
+媒体索引用于保存远程目录和文件信息，WebDAV、媒体库挂载和 TVBox 浏览目录时优先查询索引，避免反复递归请求远程站点。
+
+基本操作：
+
+1. 进入“媒体资源”。
+2. 使用直通视图浏览远程目录。
+3. 选择单个目录扫描，或在根目录执行“全部生成索引”。
+4. 在“任务中心”查看扫描进度、事件、失败信息和重试状态。
+5. 切换到媒体索引视图检查已经入库的目录和文件。
+
+系统不会下载视频文件。STRM 内容在需要时读取并保存相对播放路径；NFO、海报、字幕等辅助文件按配置从远程源读取。
+
+## WebDAV
+
+1. 在“WebDAV”页面创建账号。
+2. 为账号配置允许访问的目录，默认可以授权 `/`。
+3. 在客户端填写：
 
 ```text
-/opt/xymediavault/docker-compose.yml
-/opt/xymediavault/config.yaml
-/opt/xymediavault/data
-/opt/xymediavault/xiaoya
-/opt/xymediavault/mnt/xymediavault
-/opt/xymediavault/emby/config
+地址：http://服务器IP:18081/dav
+账号：后台创建的 WebDAV 用户名
+密码：后台设置的 WebDAV 密码
 ```
 
-部署完成后默认访问：
-
-```text
-管理后台：http://服务器IP:18080
-WebDAV：http://服务器IP:18081/dav
-TVBox：http://服务器IP:18082
-小雅 Alist：http://服务器IP:5678
-```
-
-## WebDAV 使用方式
-
-1. 在管理后台或 API 中创建 WebDAV 用户。
-2. 为用户添加路径前缀权限，例如 `/` 或 `/电影/`。
-3. 媒体服务器使用 Basic Auth 挂载 WebDAV。
-
-默认配置中 WebDAV 监听 `0.0.0.0:8081`，基础路径配置为 `/dav`。WebDAV 按只读虚拟媒体库设计，目录和文件列表来自本地索引；STRM、NFO、图片和字幕等内容在打开时通过远程源读取。
-
-## TVBox 服务
-
-TVBox 是独立于 WebDAV 的 JSON CMS 服务。它使用已经扫描到 XyMediaVault 数据库中的媒体索引，不会在 TVBox 客户端请求时递归访问远程目录，也不读取或依赖 STRM 文件内容。
-
-配置步骤：
-
-1. 登录管理后台，打开“TVBox 服务”。
-2. 创建一个 TVBox 用户，并为用户选择播放服务。
-3. 为用户配置允许访问的目录。新用户默认允许访问 `/`，也可以改成 `/电影/`、`/电视剧/` 等路径前缀。
-4. 在“设备”中创建令牌。令牌只在生成时完整显示，重置或删除设备后旧订阅地址立即失效。
-5. 将生成的订阅地址粘贴到 TVBox 客户端。
-
-订阅地址格式：
-
-```text
-http://服务器IP:18082/api/tvbox/config/设备令牌
-```
-
-如果配置了 TVBox 外部访问地址，后台生成的地址会使用该地址；留空时使用当前请求的协议和主机地址。标准 JSON CMS 地址为：
-
-```text
-http://服务器IP:18082/api/tvbox/cms/设备令牌
-```
-
-TVBox 用户可以分别控制搜索和播放权限，也可以绑定不同的 `/playback` 播放服务。电影和剧集来自统一媒体索引，剧集会依据 NFO 元数据或目录、季号和集号结构聚合，不会把每一集散列成独立影片。播放地址由服务端根据用户绑定的播放服务和数据库中的相对路径动态生成，例如：
-
-```text
-http://播放服务地址/d/电影/示例.mkv
-```
-
-不会把完整播放地址写入媒体数据库。TVBox 查看详情时按需读取已索引的 `movie.nfo` 或 `tvshow.nfo`；存在本地海报索引时通过带设备令牌的图片代理按需返回，不在本地缓存图片。NFO 仅提供 TMDB ID 而缺少部分字段时，系统可以调用后台配置的 TMDB 服务补全；TMDB 图片域名会在返回时动态改写为 `https://tmdb.keeper.work`，无需修改数据库。TVBox 页面还提供分类、目录白名单、设备令牌和访问日志管理；访问日志支持按用户、操作和状态筛选，并可清空。
-
-## 小雅 Alist 托管管理
-
-Docker Compose 默认包含 `xiaoya-alist` 服务，并把宿主机 `./xiaoya` 同时挂载给小雅和 XyMediaVault：
-
-```text
-./xiaoya/115_cookie.txt
-./xiaoya/ali2115.txt
-./xiaoya/115_list.txt
-./xiaoya/115share_list.txt
-./xiaoya/quark_cookie.txt
-./xiaoya/quark_tv_cookie.txt
-./xiaoya/mytoken.txt
-./xiaoya/myopentoken.txt
-./xiaoya/temp_transfer_folder_id.txt
-```
-
-管理后台的“小雅管理”页面提供扫码授权、查看 `xiaoya-alist` 状态、启动/停止/重启容器和 SSE 实时日志，并把小雅地址同步为媒体源和默认播放服务。页面打开后会自动接收容器启动及运行日志，连接中断后自动重连，不需要手动刷新。当前扫码授权支持 115、阿里云盘、阿里云盘 Open 和夸克 TV；普通夸克仍是 Cookie 模式。容器控制依赖 `/var/run/docker.sock`，后端只允许操作固定容器名 `xiaoya-alist`。
-
-115 授权支持选择扫码渠道，并可开启“阿里转 115 加速”。开启后系统会根据当前 `115_cookie.txt` 自动生成 `ali2115.txt`；关闭后会清空 `ali2115.txt`。页面也支持可视化维护 `115share_list.txt`，每条分享挂载按“小雅路径 分享ID 分享目录ID 提取码”的四列格式写入。
+WebDAV 为只读媒体视图。是否显示隐藏目录由账号的独立开关控制。
 
 ## 媒体库挂载
 
-Docker Compose 默认把宿主机目录 `./mnt/xymediavault` 映射到容器内 `/mnt/xymediavault`，并使用 `rshared` 传播方式。服务启动后，宿主机可以从 `./mnt/xymediavault` 看到同一套虚拟 STRM 目录。
+媒体库挂载会在安装目录中提供：
 
-默认配置：
-
-```yaml
-fuse:
-  enabled: true
-  mount_path: /mnt/xymediavault
+```text
+安装目录/mnt/xymediavault
 ```
 
-容器部署需要 `/dev/fuse`、`SYS_ADMIN` 和宿主机支持共享挂载传播；这些已经写入 `docker-compose.yml`。如果宿主机内核或面板限制用户态文件系统挂载，服务启动时会报错，此时可以先把 `fuse.enabled` 改为 `false`，继续使用 WebDAV。
+Emby、Jellyfin 或其他宿主机应用可以把该目录作为媒体库路径。页面中统一使用“媒体库挂载”名称，不需要理解 FUSE 的内部实现。
 
-## Emby 管理
+如果宿主机不支持媒体库挂载，可以在安装时关闭该功能，继续使用 WebDAV 和 TVBox。
 
-管理后台提供独立的“Emby 管理”页面。首次安装可设置宿主机访问端口，系统会拉取官方 `emby/embyserver:latest` 镜像，自动启用媒体库挂载，并创建固定名称的 `xymediavault-emby` 容器。
+## TVBox
 
-Emby 配置保存在安装目录的 `./emby/config`，媒体库以 `/media:ro` 只读挂载到 Emby。后台支持启动、停止、重启、更新、SSE 实时日志和卸载；卸载只删除容器，不删除配置目录。安装或更新时，镜像拉取、容器创建和启动进度会直接推送到日志区域，容器运行日志随后持续输出，连接中断后自动重连。Emby 由 XyMediaVault 通过 Docker Socket 独立管理，不需要也不应额外使用 `docker-compose.emby.yml`。
+1. 进入“TVBox 服务”。
+2. 创建 TVBox 用户并选择播放服务。
+3. 配置允许访问的目录，新用户默认允许 `/`。
+4. 创建或重置设备令牌。
+5. 一键复制后台生成的订阅地址到 TVBox 客户端。
 
-## 媒体索引与源站说明
+常见地址格式：
 
-媒体源表示一个 HTTP Index 访问入口；系统内置多条同构镜像，也允许在“索引源”页面添加自定义入口。扫描和文件读取按优先级访问启用源，遇到超时、网络错误或 5xx 会切换到下一个源；失败源会被短暂熔断。源站之间是同一目录结构的镜像，不参与媒体身份绑定，媒体索引也不会绑定 `source_id`。
-
-小雅 Alist 只作为播放服务使用。系统从 IndexOf 建立目录和文件索引；播放时使用用户绑定的小雅播放服务与 STRM 中解析出的 `/d/...` 相对路径动态生成地址。
-
-扫描器将远程目录、文件名、文件类型、大小、修改时间和源路径写入统一索引。后续 WebDAV、媒体库挂载、TVBox 和媒体资源页都从 SQLite 查询目录，不会因客户端反复浏览而递归扫描源站。定时扫描发现新增内容时增量写入；远程已删除的条目会在索引中标记为不可用。
-
-系统不下载视频，也不批量缓存 NFO 或图片。只有 STRM 文本在第一次实际打开时读取并缓存其相对播放路径，后续直接使用缓存；可以在媒体资源页清空 STRM 缓存，清空操作不会删除媒体索引。
-
-## 远程辅助文件映射说明
-
-`jpg`、`png`、`webp`、`nfo` 和字幕等辅助文件会随目录扫描写入文件索引。开启远程辅助文件映射后，WebDAV 或媒体库挂载客户端打开辅助文件时会从当前可用的 HTTP Index 源实时读取内容，不落盘缓存。
-
-配置项：
-
-```yaml
-virtual:
-  enable_remote_file_mapping: true
+```text
+配置地址：http://服务器IP:18082/api/tvbox/config/设备令牌
+CMS 地址：http://服务器IP:18082/api/tvbox/cms/设备令牌
 ```
 
-运行时开关由系统设置 `enable_remote_file_mapping` 控制。关闭时，WebDAV 读取辅助文件会返回不存在；开启后，系统通过当前可用的媒体源实时拉取远程辅助文件，不落盘缓存。
+不同用户可以绑定不同的播放服务，并独立控制搜索、播放和目录访问权限。
 
-## 可选元数据增强与存储边界
+## 小雅 Alist
 
-整理任务支持可选 AI 标题修正，也可以选择启用 TMDB 补全。两项都不是运行服务的必需条件：未配置对应服务、调用失败或没有匹配结果时，系统保留可推断的原始标题和路径，并记录任务结果。
+“小雅管理”页面支持：
 
-存储边界如下：
+- 阿里云盘普通 Token 和 Open Token 扫码授权
+- 115、夸克 TV 等授权配置
+- 转存目录设置
+- 分享列表维护
+- 容器启动、停止和重启
+- SSE 实时容器日志
+- 同步默认播放服务
 
-- SQLite 保存目录索引、文件索引、STRM 相对路径缓存和已获取的可选媒体元数据，不保存完整播放 URL。
-- 建立索引不会下载或复制视频内容。
-- NFO、图片和字幕仅保存远程路径，访问时按需读取，不落盘缓存。
-- WebDAV 和媒体库挂载提供数据库驱动的虚拟访问视图，不创建本地媒体副本。运行数据、配置和 SQLite 数据库位于部署目录的数据卷中。
+小雅授权文件保存在安装目录的 `xiaoya` 目录中。迁移服务器时应一并备份该目录。
 
-## 验证命令
+## Emby
+
+Emby 默认不安装，需要在“Emby 管理”页面主动安装。
+
+安装时系统会：
+
+1. 拉取官方 Emby 镜像。
+2. 启用媒体库挂载。
+3. 把媒体目录以只读方式提供给 Emby。
+4. 保存 Emby 配置到安装目录的 `emby/config`。
+
+后台支持安装、启动、停止、重启、更新和卸载。镜像拉取、容器创建、启动及运行日志会实时显示。卸载 Emby 容器不会删除 `emby/config`。
+
+## 播放服务
+
+播放服务用于把 STRM 相对路径转换成可以访问的播放地址。系统会创建默认播放服务，也可以在后台添加其他服务，并为 WebDAV 或 TVBox 用户选择不同的播放服务。
+
+播放失败时优先检查：
+
+- 播放服务地址能否从客户端访问。
+- 小雅 Alist 是否正常运行。
+- STRM 相对路径是否已经读取成功。
+- 当前用户是否有对应目录的访问权限。
+
+## 数据与备份
+
+重要数据位于安装目录：
+
+```text
+data/                 XyMediaVault 数据库和运行数据
+xiaoya/               小雅授权、Cookie 和分享配置
+emby/config/          Emby 配置
+config.yaml           服务配置
+docker-compose.yml    容器部署配置
+```
+
+备份前建议停止 XyMediaVault：
 
 ```bash
-go test -count=1 ./...
-cd web/arco-admin && npm test && npm run build
-docker compose config
+docker compose stop xymediavault
 ```
+
+完整复制上述文件和目录后再启动：
+
+```bash
+docker compose start xymediavault
+```
+
+不要只复制正在写入的 SQLite 主文件而忽略同目录中的 `-wal` 和 `-shm` 文件。
+
+## 常见问题
+
+### Docker 服务未启动
+
+确认 Docker 可以正常访问：
+
+```bash
+docker info
+docker compose version
+```
+
+执行安装脚本的用户必须有权限访问 Docker Socket。
+
+### 更新时提示传输端点尚未连接
+
+最新版安装脚本会自动停止应用并清理残留媒体库挂载。通常直接重新执行更新命令即可。
+
+仍然失败时，在安装目录执行：
+
+```bash
+docker compose stop xymediavault
+umount -l ./mnt/xymediavault
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+```
+
+### 端口被占用
+
+重新执行安装脚本，在交互提示中为管理后台、WebDAV、TVBox 或小雅填写未占用端口。更新已有安装时，脚本会保留当前端口映射。
+
+### WebDAV 能看到目录但文件无法读取
+
+检查索引任务是否完成、索引源是否可用、远程辅助文件映射设置以及用户绑定的播放服务。任务和 IO 日志会记录详细失败原因。
+
+### 数据库清理后文件大小没有立即下降
+
+删除记录不会自动缩小 SQLite 文件。请通过后台提供的数据库整理功能执行压缩，并避免在扫描任务运行时操作。
+
+## 安全提示
+
+- 不要公开 `xiaoya` 目录中的 Token、Cookie 和分享配置。
+- 不要公开数据库、TVBox 设备令牌或 WebDAV 密码。
+- 建议通过防火墙或反向代理限制管理后台访问范围。
+- 对公网开放时建议配置 HTTPS。
+
+## 赞助支持
+
+如果这个项目对你有帮助，可以通过以下方式支持后续维护。
+
+| 微信 | 支付宝 |
+| --- | --- |
+| ![微信赞赏](assets/donation/wechat-pay.jpg) | ![支付宝赞赏](assets/donation/alipay.jpg) |
+
+## 说明
+
+XyMediaVault 仅用于管理用户有权访问的媒体资源。使用者应遵守所在地法律法规及相关服务条款。
