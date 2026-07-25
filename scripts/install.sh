@@ -155,7 +155,11 @@ echo "检测到 Docker 目标架构：$TARGET_PLATFORM"
 echo
 
 fuse_mount_present() {
-  [ "$(findmnt -T "$1" -n -o FSTYPE 2>/dev/null || true)" = "fuse.xymediavault" ]
+  mount_fstype="$(findmnt -M "$1" -n -o FSTYPE 2>/dev/null || true)"
+  case "$mount_fstype" in
+    fuse | fuse.*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 cleanup_fuse_mount() {
