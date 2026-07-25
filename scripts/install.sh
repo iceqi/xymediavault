@@ -190,6 +190,20 @@ cleanup_fuse_mount() {
   return 1
 }
 
+prepare_emby_config_dir() {
+  mkdir -p "$EMBY_HOST_PATH/config"
+  if chown -R 2:2 "$EMBY_HOST_PATH/config" 2>/dev/null; then
+    chmod -R u+rwX "$EMBY_HOST_PATH/config"
+    return 0
+  fi
+
+  echo "当前文件系统不允许设置 Emby 配置目录所有者，改用兼容写权限：$EMBY_HOST_PATH/config"
+  if ! chmod -R a+rwX "$EMBY_HOST_PATH/config"; then
+    echo "无法为 Emby 配置目录设置写权限：$EMBY_HOST_PATH/config" >&2
+    return 1
+  fi
+}
+
 ensure_media_mount_compose_permissions() {
   compose_file="$1"
   if grep -q '/dev/fuse:/dev/fuse' "$compose_file"; then
@@ -374,8 +388,9 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     exit 0
   fi
 
-  mkdir -p "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
-  cd "$INSTALL_DIR"
+	mkdir -p "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
+	prepare_emby_config_dir
+	cd "$INSTALL_DIR"
   detected_api_port="$(detect_compose_host_port docker-compose.yml 8080 || true)"
   detected_webdav_port="$(detect_compose_host_port docker-compose.yml 8081 || true)"
   detected_tvbox_port="$(detect_compose_host_port docker-compose.yml 8082 || true)"
@@ -521,6 +536,7 @@ if [ "$CONTINUE_INSTALL" != "true" ]; then
 fi
 
 mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
+prepare_emby_config_dir
 cd "$INSTALL_DIR"
 
 # 旧版本异常退出可能留下媒体库坏挂载，确认清理完成后再交给 Docker 做 bind mount。
