@@ -72,6 +72,7 @@ case "$INSTALL_DIR" in
   *) INSTALL_DIR="$START_DIR/$INSTALL_DIR" ;;
 esac
 FUSE_HOST_PATH="$INSTALL_DIR/mnt/xymediavault"
+EMBY_HOST_PATH="$INSTALL_DIR/emby"
 API_PORT="${API_PORT:-18080}"
 TVBOX_PORT="${TVBOX_PORT:-18082}"
 WEBDAV_PORT="${WEBDAV_PORT:-18081}"
@@ -163,7 +164,7 @@ cleanup_fuse_mount() {
     return 0
   fi
 
-  echo "检测到旧 FUSE 挂载，正在卸载：$mount_path"
+  echo "检测到旧媒体库挂载，正在卸载：$mount_path"
   if command -v fusermount3 >/dev/null 2>&1; then
     fusermount3 -uz "$mount_path" 2>/dev/null || true
   fi
@@ -181,8 +182,36 @@ cleanup_fuse_mount() {
     attempt=$((attempt + 1))
   done
 
-  echo "无法清理 FUSE 挂载：$mount_path，请执行 umount -l 后重试。" >&2
+  echo "无法清理媒体库挂载：$mount_path，请执行 umount -l 后重试。" >&2
   return 1
+}
+
+ensure_media_mount_compose_permissions() {
+  compose_file="$1"
+  if grep -q '/dev/fuse:/dev/fuse' "$compose_file"; then
+    return 0
+  fi
+  temporary_compose="$(mktemp "${TMPDIR:-/tmp}/xymediavault-compose.XXXXXX")"
+  if ! awk '
+    BEGIN { in_service = 0; inserted = 0 }
+    /^  xymediavault:[[:space:]]*$/ { in_service = 1 }
+    in_service && !inserted && /^    volumes:[[:space:]]*$/ {
+      print "    devices:"
+      print "      - /dev/fuse:/dev/fuse"
+      print "    cap_add:"
+      print "      - SYS_ADMIN"
+      print "    security_opt:"
+      print "      - apparmor:unconfined"
+      inserted = 1
+    }
+    { print }
+    END { if (!inserted) exit 42 }
+  ' "$compose_file" >"$temporary_compose"; then
+    rm -f "$temporary_compose"
+    echo "更新媒体库挂载权限失败。" >&2
+    return 1
+  fi
+  mv "$temporary_compose" "$compose_file"
 }
 
 ensure_tvbox_compose_port() {
@@ -341,7 +370,7 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     exit 0
   fi
 
-  mkdir -p "$FUSE_HOST_PATH"
+  mkdir -p "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
   cd "$INSTALL_DIR"
   detected_api_port="$(detect_compose_host_port docker-compose.yml 8080 || true)"
   detected_webdav_port="$(detect_compose_host_port docker-compose.yml 8081 || true)"
@@ -370,12 +399,18 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   else
     sed -i "/XYMEDIAVAULT_FUSE_HOST_PATH:/a\      XYMEDIAVAULT_XIAOYA_HOST_PATH: \"$INSTALL_DIR/xiaoya\"" docker-compose.yml
   fi
+  if grep -q 'XYMEDIAVAULT_EMBY_HOST_PATH:' docker-compose.yml; then
+    sed -i "s#^\([[:space:]]*XYMEDIAVAULT_EMBY_HOST_PATH:[[:space:]]*\).*$#\1\"$EMBY_HOST_PATH\"#" docker-compose.yml
+  else
+    sed -i "/XYMEDIAVAULT_XIAOYA_HOST_PATH:/a\      XYMEDIAVAULT_EMBY_HOST_PATH: \"$EMBY_HOST_PATH\"" docker-compose.yml
+  fi
   if grep -q '^[[:space:]]*TZ:' docker-compose.yml; then
     sed -i 's#^\([[:space:]]*TZ:[[:space:]]*\).*$#\1"Asia/Shanghai"#' docker-compose.yml
   else
     sed -i '/XYMEDIAVAULT_XIAOYA_HOST_PATH:/a\      TZ: "Asia/Shanghai"' docker-compose.yml
   fi
   ensure_tvbox_compose_port docker-compose.yml
+  ensure_media_mount_compose_permissions docker-compose.yml
   ensure_tvbox_runtime_config config.yaml
   ensure_webdav_runtime_config config.yaml
 
@@ -407,7 +442,7 @@ TVBOX_PORT="$(prompt_value "TVBox 服务端口" "${TVBOX_PORT:-18082}")"
 XIAOYA_PORT="$(prompt_value "小雅 Alist 端口" "${XIAOYA_PORT:-5678}")"
 XIAOYA_ADMIN_PORT="$(prompt_value "小雅管理端口" "${XIAOYA_ADMIN_PORT:-2345}")"
 XIAOYA_PROXY_PORT="$(prompt_value "小雅代理端口" "${XIAOYA_PROXY_PORT:-2346}")"
-ENABLE_FUSE="$(prompt_bool "启用 FUSE 虚拟目录" "${ENABLE_FUSE:-true}")"
+ENABLE_FUSE="$(prompt_bool "启用媒体库挂载" "${ENABLE_FUSE:-true}")"
 FORCE_PULL="$(prompt_bool "强制从远端拉取镜像" "${FORCE_PULL:-false}")"
 
 echo
@@ -422,7 +457,7 @@ echo "  TVBox 服务端口：$TVBOX_PORT"
 echo "  小雅 Alist 端口：$XIAOYA_PORT"
 echo "  小雅管理端口：$XIAOYA_ADMIN_PORT"
 echo "  小雅代理端口：$XIAOYA_PROXY_PORT"
-echo "  FUSE：$ENABLE_FUSE"
+echo "  媒体库挂载：$ENABLE_FUSE"
 echo "  强制拉取：$FORCE_PULL"
 echo
 
@@ -432,10 +467,10 @@ if [ "$CONTINUE_INSTALL" != "true" ]; then
   exit 0
 fi
 
-mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$FUSE_HOST_PATH"
+mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
 cd "$INSTALL_DIR"
 
-# 旧版本异常退出可能留下 FUSE 坏挂载，确认清理完成后再交给 Docker 做 bind mount。
+# 旧版本异常退出可能留下媒体库坏挂载，确认清理完成后再交给 Docker 做 bind mount。
 cleanup_fuse_mount "$FUSE_HOST_PATH"
 mkdir -p "$FUSE_HOST_PATH"
 
@@ -492,17 +527,6 @@ else
   echo "保留已有配置：$INSTALL_DIR/config.yaml"
 fi
 
-FUSE_BLOCK=""
-if [ "$ENABLE_FUSE" = "true" ]; then
-  FUSE_BLOCK='
-    devices:
-      - /dev/fuse:/dev/fuse
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined'
-fi
-
 cat > docker-compose.yml <<COMPOSE
 services:
   xymediavault:
@@ -512,12 +536,19 @@ services:
       TZ: "Asia/Shanghai"
       XYMEDIAVAULT_FUSE_HOST_PATH: "${FUSE_HOST_PATH}"
       XYMEDIAVAULT_XIAOYA_HOST_PATH: "${INSTALL_DIR}/xiaoya"
+      XYMEDIAVAULT_EMBY_HOST_PATH: "${EMBY_HOST_PATH}"
     ports:
       - "${API_PORT}:8080"
       - "${WEBDAV_PORT}:8081"
       - "${TVBOX_PORT}:8082"
     depends_on:
-      - xiaoya-alist${FUSE_BLOCK}
+      - xiaoya-alist
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     volumes:
       - ./data:/app/data
       - ${FUSE_HOST_PATH}:/mnt/xymediavault:rshared

@@ -1,10 +1,10 @@
 # XyMediaVault
 
-XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 场景的媒体资源索引与虚拟文件系统服务。它从 HTTP Index 扫描目录及文件信息，在 SQLite 中维护统一索引，再通过 WebDAV、FUSE 和 TVBox 提供稳定的媒体视图。媒体服务器浏览目录时只查询本地索引，不再递归访问远程源站。
+XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 场景的媒体资源索引与虚拟文件系统服务。它从 HTTP Index 扫描目录及文件信息，在 SQLite 中维护统一索引，再通过 WebDAV、媒体库挂载和 TVBox 提供稳定的媒体视图。媒体服务器浏览目录时只查询本地索引，不再递归访问远程源站。
 
 数据库保存目录结构、文件路径和可选元数据，不保存视频内容或完整播放 URL。STRM 文本在第一次读取时从远程源获取并缓存；NFO、海报、字幕等辅助文件仅保存索引路径，在客户端实际访问时按需从远程读取。
 
-当前功能包含 Go 后端、SQLite 媒体索引、HTTP Index 多源故障切换、定时增量扫描、动态 STRM、只读 WebDAV、FUSE、TVBox JSON CMS 和 Arco 管理后台。
+当前功能包含 Go 后端、SQLite 媒体索引、HTTP Index 多源故障切换、定时增量扫描、动态 STRM、只读 WebDAV、媒体库挂载、TVBox JSON CMS、Emby 容器管理和 Arco 管理后台。
 
 ## 快速启动
 
@@ -33,7 +33,7 @@ npm run dev
 - TVBox 端口：容器内 `8082`，默认映射到宿主机 `18082`
 - 数据目录：`./data:/app/data`
 - 数据库：SQLite，文件为 `/app/data/xymediavault.db`
-- FUSE：默认启用，需要宿主机提供 `/dev/fuse` 和 `SYS_ADMIN`
+- 媒体库挂载：默认启用，需要宿主机提供 `/dev/fuse` 和 `SYS_ADMIN`
 
 启动：
 
@@ -78,7 +78,7 @@ DOCKER_IMAGE=你的DockerHub用户名/xymediavault VERSION=1.0.0 sh scripts/publ
 你的DockerHub用户名/xymediavault:latest
 ```
 
-镜像构建上下文已经通过 `.dockerignore` 排除了 `data/`、`mnt/` 和 `xiaoya/`，不会把本地数据库、FUSE 目录、115 Cookie、阿里/夸克 token 等敏感文件打包进镜像。
+镜像构建上下文已经通过 `.dockerignore` 排除了 `data/`、`mnt/` 和 `xiaoya/`，不会把本地数据库、媒体库挂载目录、115 Cookie、阿里/夸克 token 等敏感文件打包进镜像。
 
 ## 一键部署
 
@@ -101,7 +101,7 @@ TVBox 服务端口
 小雅 Alist 端口
 小雅管理端口
 小雅代理端口
-是否启用 FUSE
+是否启用媒体库挂载
 是否强制拉取镜像
 ```
 
@@ -136,7 +136,7 @@ sh install.sh
 FORCE_PULL=true sh install.sh
 ```
 
-安装和更新使用同一个脚本。脚本会检查安装目录中是否已有 `docker-compose.yml`：不存在时进入首次安装配置；存在时自动进入更新流程，保留原有配置，只停止 XyMediaVault、清理宿主机残留的 FUSE 挂载、拉取或构建新镜像并重建应用容器。
+安装和更新使用同一个脚本。脚本会检查安装目录中是否已有 `docker-compose.yml`：不存在时进入首次安装配置；存在时自动进入更新流程，保留原有配置，只停止 XyMediaVault、清理宿主机残留的媒体库挂载、拉取或构建新镜像并重建应用容器。
 
 安装目录留空时使用执行脚本时的当前目录。如果希望安装到其他位置，可以在交互提示中输入目录，也可以通过 `INSTALL_DIR` 指定：
 
@@ -144,7 +144,7 @@ FORCE_PULL=true sh install.sh
 INSTALL_DIR=/opt/xymediavault sh install.sh
 ```
 
-数据库迁移会在新容器启动时自动执行。不要直接在 FUSE 已挂载时使用 `docker-compose up --force-recreate`，否则旧挂载可能阻止 Docker 创建 bind mount。
+数据库迁移会在新容器启动时自动执行。不要直接在媒体库已挂载时使用 `docker-compose up --force-recreate`，否则旧挂载可能阻止 Docker 创建 bind mount。
 
 脚本会自动创建：
 
@@ -154,6 +154,7 @@ INSTALL_DIR=/opt/xymediavault sh install.sh
 /opt/xymediavault/data
 /opt/xymediavault/xiaoya
 /opt/xymediavault/mnt/xymediavault
+/opt/xymediavault/emby/config
 ```
 
 部署完成后默认访问：
@@ -221,13 +222,13 @@ Docker Compose 默认包含 `xiaoya-alist` 服务，并把宿主机 `./xiaoya` �
 ./xiaoya/temp_transfer_folder_id.txt
 ```
 
-管理后台的“小雅管理”页面提供扫码授权、查看 `xiaoya-alist` 状态、启动/停止/重启容器、读取最近日志，并把小雅地址同步为媒体源和默认播放服务。当前扫码授权支持 115、阿里云盘、阿里云盘 Open 和夸克 TV；普通夸克仍是 Cookie 模式。容器控制依赖 `/var/run/docker.sock`，后端只允许操作固定容器名 `xiaoya-alist`。
+管理后台的“小雅管理”页面提供扫码授权、查看 `xiaoya-alist` 状态、启动/停止/重启容器和 SSE 实时日志，并把小雅地址同步为媒体源和默认播放服务。页面打开后会自动接收容器启动及运行日志，连接中断后自动重连，不需要手动刷新。当前扫码授权支持 115、阿里云盘、阿里云盘 Open 和夸克 TV；普通夸克仍是 Cookie 模式。容器控制依赖 `/var/run/docker.sock`，后端只允许操作固定容器名 `xiaoya-alist`。
 
 115 授权支持选择扫码渠道，并可开启“阿里转 115 加速”。开启后系统会根据当前 `115_cookie.txt` 自动生成 `ali2115.txt`；关闭后会清空 `ali2115.txt`。页面也支持可视化维护 `115share_list.txt`，每条分享挂载按“小雅路径 分享ID 分享目录ID 提取码”的四列格式写入。
 
-## FUSE 注意事项
+## 媒体库挂载
 
-Docker Compose 默认把宿主机目录 `./mnt/xymediavault` 映射到容器内 `/mnt/xymediavault`，并使用 `rshared` 传播方式。服务启动后，FUSE 在容器内挂载到 `/mnt/xymediavault`，宿主机也可以从 `./mnt/xymediavault` 看到同一套虚拟 STRM 目录。
+Docker Compose 默认把宿主机目录 `./mnt/xymediavault` 映射到容器内 `/mnt/xymediavault`，并使用 `rshared` 传播方式。服务启动后，宿主机可以从 `./mnt/xymediavault` 看到同一套虚拟 STRM 目录。
 
 默认配置：
 
@@ -237,7 +238,13 @@ fuse:
   mount_path: /mnt/xymediavault
 ```
 
-容器部署需要 `/dev/fuse`、`SYS_ADMIN` 和宿主机支持共享挂载传播；这些已经写入 `docker-compose.yml`。如果宿主机内核或面板环境限制 FUSE，服务启动时会报挂载失败，此时可以先把 `fuse.enabled` 改为 `false`，继续使用 WebDAV。
+容器部署需要 `/dev/fuse`、`SYS_ADMIN` 和宿主机支持共享挂载传播；这些已经写入 `docker-compose.yml`。如果宿主机内核或面板限制用户态文件系统挂载，服务启动时会报错，此时可以先把 `fuse.enabled` 改为 `false`，继续使用 WebDAV。
+
+## Emby 管理
+
+管理后台提供独立的“Emby 管理”页面。首次安装可设置宿主机访问端口，系统会拉取官方 `emby/embyserver:latest` 镜像，自动启用媒体库挂载，并创建固定名称的 `xymediavault-emby` 容器。
+
+Emby 配置保存在安装目录的 `./emby/config`，媒体库以 `/media:ro` 只读挂载到 Emby。后台支持启动、停止、重启、更新、SSE 实时日志和卸载；卸载只删除容器，不删除配置目录。安装或更新时，镜像拉取、容器创建和启动进度会直接推送到日志区域，容器运行日志随后持续输出，连接中断后自动重连。Emby 由 XyMediaVault 通过 Docker Socket 独立管理，不需要也不应额外使用 `docker-compose.emby.yml`。
 
 ## 媒体索引与源站说明
 
@@ -245,13 +252,13 @@ fuse:
 
 小雅 Alist 只作为播放服务使用。系统从 IndexOf 建立目录和文件索引；播放时使用用户绑定的小雅播放服务与 STRM 中解析出的 `/d/...` 相对路径动态生成地址。
 
-扫描器将远程目录、文件名、文件类型、大小、修改时间和源路径写入统一索引。后续 WebDAV、FUSE、TVBox 和媒体资源页都从 SQLite 查询目录，不会因客户端反复浏览而递归扫描源站。定时扫描发现新增内容时增量写入；远程已删除的条目会在索引中标记为不可用。
+扫描器将远程目录、文件名、文件类型、大小、修改时间和源路径写入统一索引。后续 WebDAV、媒体库挂载、TVBox 和媒体资源页都从 SQLite 查询目录，不会因客户端反复浏览而递归扫描源站。定时扫描发现新增内容时增量写入；远程已删除的条目会在索引中标记为不可用。
 
 系统不下载视频，也不批量缓存 NFO 或图片。只有 STRM 文本在第一次实际打开时读取并缓存其相对播放路径，后续直接使用缓存；可以在媒体资源页清空 STRM 缓存，清空操作不会删除媒体索引。
 
 ## 远程辅助文件映射说明
 
-`jpg`、`png`、`webp`、`nfo` 和字幕等辅助文件会随目录扫描写入文件索引。开启远程辅助文件映射后，WebDAV/FUSE 在客户端打开辅助文件时从当前可用的 HTTP Index 源实时读取内容，不落盘缓存。
+`jpg`、`png`、`webp`、`nfo` 和字幕等辅助文件会随目录扫描写入文件索引。开启远程辅助文件映射后，WebDAV 或媒体库挂载客户端打开辅助文件时会从当前可用的 HTTP Index 源实时读取内容，不落盘缓存。
 
 配置项：
 
@@ -271,7 +278,7 @@ virtual:
 - SQLite 保存目录索引、文件索引、STRM 相对路径缓存和已获取的可选媒体元数据，不保存完整播放 URL。
 - 建立索引不会下载或复制视频内容。
 - NFO、图片和字幕仅保存远程路径，访问时按需读取，不落盘缓存。
-- WebDAV 和 FUSE 提供数据库驱动的虚拟访问视图，不创建本地媒体副本。运行数据、配置和 SQLite 数据库位于部署目录的数据卷中。
+- WebDAV 和媒体库挂载提供数据库驱动的虚拟访问视图，不创建本地媒体副本。运行数据、配置和 SQLite 数据库位于部署目录的数据卷中。
 
 ## 验证命令
 
