@@ -43,13 +43,17 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediav
 sh install.sh
 ```
 
-脚本必须在交互式终端中执行，因为所有部署参数都会逐项确认。安装目录留空时使用当前执行目录；也可以在提示中输入绝对路径或相对路径，或提前设置 `INSTALL_DIR`。
+脚本必须在交互式终端中执行，因为所有部署参数都会逐项确认。安装目录留空时使用当前执行目录；也可以在提示中输入绝对路径或相对路径，或通过第一个位置参数指定建议值：
+
+```bash
+sh install.sh /opt/xymediavault
+```
 
 ### 安装参数
 
 | 参数 | 说明 | 建议值 |
 | --- | --- | --- |
-| `INSTALL_DIR` | 配置、数据库和小雅文件目录 | 执行脚本时的当前目录 |
+| 第一个位置参数 | 安装目录，即配置、数据库和小雅文件目录 | 执行脚本时的当前目录 |
 | `IMAGE` | XyMediaVault Docker 镜像 | `iceqi/xymediavault:latest` |
 | `PUBLIC_HOST` | 用户访问服务时使用的 IP 或域名 | 自动检测服务器 IP |
 | `API_PORT` | 管理后台端口 | `18080` |
@@ -58,20 +62,17 @@ sh install.sh
 | `XIAOYA_PORT` | 小雅 Alist 端口 | `5678` |
 | `XIAOYA_ADMIN_PORT` | 小雅管理端口 | `2345` |
 | `XIAOYA_PROXY_PORT` | 小雅代理端口 | `2346` |
-| `ENABLE_FUSE` | 是否启用 FUSE 虚拟目录 | `true` |
 | `FORCE_PULL` | 是否忽略本地镜像并强制拉取 | `false` |
 
-脚本会自动识别 Docker 的运行架构，目前支持 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7`。Docker 会从同一个 `iceqi/xymediavault:latest` 标签选择正确镜像，不需要用户手动指定架构。
+脚本会自动识别 Docker 的运行架构，目前支持 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7`。Docker 会从同一个 `iceqi/xymediavault:latest` 标签选择正确镜像，不需要用户手动指定架构。脚本也会自动检测本机是否具备 FUSE 设备、容器权限和共享挂载传播能力，不再提供手动启用选项。
 
 环境变量只修改交互提示中的建议值，脚本仍会要求用户确认。例如：
 
 ```bash
-INSTALL_DIR=/opt/xymediavault \
 PUBLIC_HOST=192.168.1.10 \
 API_PORT=18080 \
 WEBDAV_PORT=18081 \
 TVBOX_PORT=18082 \
-ENABLE_FUSE=false \
 sh install.sh
 ```
 
@@ -138,14 +139,14 @@ FUSE 依赖：
 - 容器 `SYS_ADMIN` capability
 - `rshared` 挂载传播
 
-如果当前服务器或 NAS 不允许 FUSE，请在安装时选择关闭。关闭 FUSE 不影响管理后台和 WebDAV。
+安装脚本会自动验证 `/dev/fuse`、Docker 运行模式、`SYS_ADMIN`、AppArmor 和 `rshared` bind。检测通过时才生成安装器管理的 FUSE Compose 配置；检测不可用时不会授予相关高权限，管理后台、WebDAV 和 TVBox 仍可使用。实际挂载和卸载继续由管理后台控制。
 
 ## 7. 更新
 
 重新下载并执行最新脚本：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | INSTALL_DIR=/opt/xymediavault sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /opt/xymediavault
 ```
 
 脚本检测到安装目录下存在 `docker-compose.yml` 后会进入更新流程。配置、数据库和小雅授权文件会被保留。

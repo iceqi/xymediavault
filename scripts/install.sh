@@ -57,6 +57,122 @@ prompt_bool() {
   done
 }
 
+# BEGIN FUSE CAPABILITY HELPERS
+docker_endpoint_is_local() {
+  docker_endpoint="${DOCKER_HOST:-}"
+  if [ -z "$docker_endpoint" ]; then
+    docker_endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
+  fi
+  case "$docker_endpoint" in
+    "" | unix://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+docker_is_rootless() {
+  docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -qi 'rootless'
+}
+
+detect_fuse_support() {
+  FUSE_SUPPORTED="false"
+  FUSE_SUPPORT_REASON="主机没有可用的 /dev/fuse"
+  fuse_device_path="${FUSE_DEVICE_PATH:-/dev/fuse}"
+  if [ ! -c "$fuse_device_path" ]; then
+    return 0
+  fi
+  if docker_is_rootless; then
+    FUSE_SUPPORT_REASON="当前 Docker 运行在 rootless 模式"
+    return 0
+  fi
+
+  probe_name="xymediavault-fuse-probe-$$"
+  probe_image="${FUSE_PROBE_IMAGE:-${IMAGE:-alpine:3.22}}"
+  if docker create --name "$probe_name" \
+    --network none \
+    --device "$fuse_device_path:/dev/fuse" \
+    --cap-add SYS_ADMIN \
+    --security-opt apparmor=unconfined \
+    --mount "type=bind,src=$FUSE_HOST_PATH,dst=/mnt/xymediavault,bind-propagation=rshared" \
+    --entrypoint /bin/true \
+    "$probe_image" >/dev/null 2>&1 && \
+    docker start -a "$probe_name" >/dev/null 2>&1; then
+    FUSE_SUPPORTED="true"
+    FUSE_SUPPORT_REASON=""
+  else
+    FUSE_SUPPORT_REASON="Docker 不允许所需设备、权限或共享挂载"
+  fi
+  docker rm -f "$probe_name" >/dev/null 2>&1 || true
+}
+
+yaml_quote() {
+  escaped_value="$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  printf '"%s"' "$escaped_value"
+}
+
+write_fuse_compose_override() {
+  override_path="$1"
+  override_dir="$(dirname "$override_path")"
+  temporary_override="$(mktemp "$override_dir/.xymediavault-fuse-compose.XXXXXX")"
+  fuse_source="$(yaml_quote "$FUSE_HOST_PATH")"
+  cat >"$temporary_override" <<FUSE_COMPOSE
+# xymediavault-managed-fuse:start
+services:
+  xymediavault:
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - type: bind
+        source: $fuse_source
+        target: /mnt/xymediavault
+        bind:
+          propagation: rshared
+# xymediavault-managed-fuse:end
+FUSE_COMPOSE
+
+  if ! $COMPOSE --project-directory "$INSTALL_DIR" \
+    -f "$INSTALL_DIR/docker-compose.yml" -f "$temporary_override" config -q; then
+    rm -f "$temporary_override"
+    echo "媒体库挂载 Compose 配置校验失败。" >&2
+    return 1
+  fi
+  mv "$temporary_override" "$override_path"
+}
+
+print_fuse_capability() {
+  if [ "$FUSE_SUPPORTED" = "true" ]; then
+    echo "媒体库挂载能力：可用（安装后在管理后台启用）"
+  else
+    echo "媒体库挂载能力：不可用（仍可使用 WebDAV 和 TVBox）"
+    [ -z "${FUSE_SUPPORT_REASON:-}" ] || echo "  原因：$FUSE_SUPPORT_REASON"
+  fi
+}
+
+xymediavault_service_has_fuse_declaration() {
+  awk '
+    BEGIN { in_service = 0; found = 0; media_volume = 0 }
+    /^  xymediavault:[[:space:]]*$/ { in_service = 1; next }
+    in_service && /^  [^[:space:]][^:]*:[[:space:]]*$/ { in_service = 0; media_volume = 0 }
+    in_service && /\/dev\/fuse|SYS_ADMIN|apparmor:unconfined/ { found = 1 }
+    in_service && /\/mnt\/xymediavault:rshared/ { found = 1 }
+    in_service && /target:[[:space:]]*\/mnt\/xymediavault[[:space:]]*$/ { media_volume = 1 }
+    in_service && media_volume && /propagation:[[:space:]]*rshared[[:space:]]*$/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
+run_compose() {
+  if [ -f "$INSTALL_DIR/docker-compose.fuse.yml" ]; then
+    $COMPOSE -f "$INSTALL_DIR/docker-compose.yml" -f "$INSTALL_DIR/docker-compose.fuse.yml" "$@"
+  else
+    $COMPOSE -f "$INSTALL_DIR/docker-compose.yml" "$@"
+  fi
+}
+# END FUSE CAPABILITY HELPERS
+
 if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
   echo "当前环境没有可用的交互终端，请在终端中执行：sh install.sh" >&2
   exit 1
@@ -80,6 +196,11 @@ XIAOYA_PORT="${XIAOYA_PORT:-5678}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "未找到 docker 命令，请先安装 Docker。" >&2
+  exit 1
+fi
+
+if ! docker_endpoint_is_local; then
+  echo "当前安装器只支持本地 Docker 服务，因为运行目录需要绑定到本机容器。" >&2
   exit 1
 fi
 
@@ -190,6 +311,56 @@ cleanup_fuse_mount() {
   return 1
 }
 
+# 媒体库现在由根目录下的多个子挂载组成，逐层清理后再交给 Docker 做 bind mount。
+# 用通配符枚举子项：通配不做 stat，上一轮留下的坏挂载也能被列出来。
+cleanup_fuse_mounts_under() {
+  cleanup_root="$1"
+  cleanup_depth="${2:-0}"
+  if [ "$cleanup_depth" -ge 4 ]; then
+    return 0
+  fi
+  for cleanup_child in "$cleanup_root"/*; do
+    [ "$cleanup_child" != "$cleanup_root/*" ] || continue
+    # 先递归到更深的层级，保证卸载顺序是由内向外。
+    cleanup_fuse_mounts_under "$cleanup_child" "$((cleanup_depth + 1))" || true
+    cleanup_fuse_mount "$cleanup_child" || true
+  done
+  cleanup_fuse_mount "$cleanup_root"
+}
+
+# 媒体库根目录在旧版本里本身就是一个 FUSE 挂载。升级成根目录下的多个子挂载后，
+# Emby 的挂载命名空间里仍持有旧挂载的失效引用，/media 会报传输端点未连接，
+# 只有重启 Emby 容器才能按当前宿主机状态重新绑定。
+restart_emby_if_media_unavailable() {
+  emby_container="xymediavault-emby"
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$emby_container"; then
+    return 0
+  fi
+
+  # 先等 XyMediaVault 把挂载建起来，避免 Emby 重启后短时间内看到空目录。
+  wait_attempt=1
+  while [ "$wait_attempt" -le 15 ]; do
+    if findmnt -M "$FUSE_HOST_PATH" >/dev/null 2>&1 || [ -n "$(ls -A "$FUSE_HOST_PATH" 2>/dev/null || true)" ]; then
+      break
+    fi
+    sleep 2
+    wait_attempt=$((wait_attempt + 1))
+  done
+
+  if docker exec "$emby_container" ls /media >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Emby 媒体目录不可用，正在重启 Emby 容器..."
+  docker restart "$emby_container" >/dev/null 2>&1 || true
+  sleep 5
+  if docker exec "$emby_container" ls /media >/dev/null 2>&1; then
+    echo "Emby 媒体目录已恢复。"
+  else
+    echo "Emby 媒体目录仍不可用，请手动执行：docker restart $emby_container" >&2
+  fi
+}
+
 prepare_emby_config_dir() {
   mkdir -p "$EMBY_HOST_PATH/config"
   if chown -R 2:2 "$EMBY_HOST_PATH/config" 2>/dev/null; then
@@ -202,34 +373,6 @@ prepare_emby_config_dir() {
     echo "无法为 Emby 配置目录设置写权限：$EMBY_HOST_PATH/config" >&2
     return 1
   fi
-}
-
-ensure_media_mount_compose_permissions() {
-  compose_file="$1"
-  if grep -q '/dev/fuse:/dev/fuse' "$compose_file"; then
-    return 0
-  fi
-  temporary_compose="$(mktemp "${TMPDIR:-/tmp}/xymediavault-compose.XXXXXX")"
-  if ! awk '
-    BEGIN { in_service = 0; inserted = 0 }
-    /^  xymediavault:[[:space:]]*$/ { in_service = 1 }
-    in_service && !inserted && /^    volumes:[[:space:]]*$/ {
-      print "    devices:"
-      print "      - /dev/fuse:/dev/fuse"
-      print "    cap_add:"
-      print "      - SYS_ADMIN"
-      print "    security_opt:"
-      print "      - apparmor:unconfined"
-      inserted = 1
-    }
-    { print }
-    END { if (!inserted) exit 42 }
-  ' "$compose_file" >"$temporary_compose"; then
-    rm -f "$temporary_compose"
-    echo "更新媒体库挂载权限失败。" >&2
-    return 1
-  fi
-  mv "$temporary_compose" "$compose_file"
 }
 
 ensure_tvbox_compose_port() {
@@ -391,6 +534,20 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
 	mkdir -p "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
 	prepare_emby_config_dir
 	cd "$INSTALL_DIR"
+
+  detect_fuse_support
+  print_fuse_capability
+  if [ "$FUSE_SUPPORTED" != "true" ] && {
+    [ -f "$INSTALL_DIR/docker-compose.fuse.yml" ] ||
+      xymediavault_service_has_fuse_declaration "$INSTALL_DIR/docker-compose.yml"
+  }; then
+    echo "当前主机不支持媒体库挂载，但已有安装仍声明 FUSE 权限。为避免中断 Emby，本次更新未执行。" >&2
+    exit 1
+  fi
+  if [ "$FUSE_SUPPORTED" = "true" ]; then
+    write_fuse_compose_override "$INSTALL_DIR/docker-compose.fuse.yml"
+  fi
+
   detected_api_port="$(detect_compose_host_port docker-compose.yml 8080 || true)"
   detected_webdav_port="$(detect_compose_host_port docker-compose.yml 8081 || true)"
   detected_tvbox_port="$(detect_compose_host_port docker-compose.yml 8082 || true)"
@@ -401,9 +558,9 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   [ -z "$detected_xiaoya_port" ] || XIAOYA_PORT="$detected_xiaoya_port"
 
   echo "停止旧 XyMediaVault 容器..."
-  $COMPOSE stop xymediavault >/dev/null 2>&1 || true
-  cleanup_fuse_mount "$FUSE_HOST_PATH"
-  cleanup_fuse_mount "/mnt/xymediavault"
+  run_compose stop xymediavault >/dev/null 2>&1 || true
+  cleanup_fuse_mounts_under "$FUSE_HOST_PATH"
+  cleanup_fuse_mounts_under "/mnt/xymediavault"
   mkdir -p "$FUSE_HOST_PATH"
 
   # 使用安装目录下的宿主机挂载点，并将其绝对路径传给后台页面展示。
@@ -478,20 +635,19 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   fi
   mv "$temporary_compose" docker-compose.yml
   ensure_tvbox_compose_port docker-compose.yml
-  ensure_media_mount_compose_permissions docker-compose.yml
   ensure_tvbox_runtime_config config.yaml
   ensure_webdav_runtime_config config.yaml
 
   if grep -q '^[[:space:]]*build:' docker-compose.yml; then
     echo "检测到本地构建模式，重新构建 XyMediaVault 镜像..."
-    $COMPOSE build xymediavault
+    run_compose build xymediavault
   else
     echo "拉取最新 XyMediaVault 镜像..."
-    $COMPOSE pull xymediavault
+    run_compose pull xymediavault
   fi
 
   echo "重建 XyMediaVault 容器..."
-  $COMPOSE up -d --no-deps --force-recreate xymediavault
+  run_compose up -d --no-deps --force-recreate xymediavault
 
   echo
   print_access_info
@@ -510,7 +666,6 @@ TVBOX_PORT="$(prompt_value "TVBox 服务端口" "${TVBOX_PORT:-18082}")"
 XIAOYA_PORT="$(prompt_value "小雅 Alist 端口" "${XIAOYA_PORT:-5678}")"
 XIAOYA_ADMIN_PORT="$(prompt_value "小雅管理端口" "${XIAOYA_ADMIN_PORT:-2345}")"
 XIAOYA_PROXY_PORT="$(prompt_value "小雅代理端口" "${XIAOYA_PROXY_PORT:-2346}")"
-ENABLE_FUSE="$(prompt_bool "启用媒体库挂载" "${ENABLE_FUSE:-true}")"
 FORCE_PULL="$(prompt_bool "强制从远端拉取镜像" "${FORCE_PULL:-false}")"
 
 echo
@@ -525,7 +680,6 @@ echo "  TVBox 服务端口：$TVBOX_PORT"
 echo "  小雅 Alist 端口：$XIAOYA_PORT"
 echo "  小雅管理端口：$XIAOYA_ADMIN_PORT"
 echo "  小雅代理端口：$XIAOYA_PROXY_PORT"
-echo "  媒体库挂载：$ENABLE_FUSE"
 echo "  强制拉取：$FORCE_PULL"
 echo
 
@@ -539,8 +693,11 @@ mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$FUSE_HOST_PATH" "$EMBY
 prepare_emby_config_dir
 cd "$INSTALL_DIR"
 
+detect_fuse_support
+print_fuse_capability
+
 # 旧版本异常退出可能留下媒体库坏挂载，确认清理完成后再交给 Docker 做 bind mount。
-cleanup_fuse_mount "$FUSE_HOST_PATH"
+cleanup_fuse_mounts_under "$FUSE_HOST_PATH"
 mkdir -p "$FUSE_HOST_PATH"
 
 WRITE_CONFIG="true"
@@ -579,7 +736,6 @@ tvbox:
   token_key_file: /app/data/tvbox-token.key
 
 fuse:
-  enabled: ${ENABLE_FUSE}
   mount_path: /mnt/xymediavault
 
 xiaoya:
@@ -612,15 +768,8 @@ services:
       - "${TVBOX_PORT}:8082"
     depends_on:
       - xiaoya-alist
-    devices:
-      - /dev/fuse:/dev/fuse
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
     volumes:
       - ./data:/app/data
-      - ${FUSE_HOST_PATH}:/mnt/xymediavault:rshared
       - ./xiaoya:/app/xiaoya
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
@@ -640,29 +789,38 @@ services:
     restart: unless-stopped
 COMPOSE
 
+if [ "$FUSE_SUPPORTED" = "true" ]; then
+  write_fuse_compose_override "$INSTALL_DIR/docker-compose.fuse.yml"
+elif [ -e "$INSTALL_DIR/docker-compose.fuse.yml" ]; then
+  echo "检测到已有 docker-compose.fuse.yml，但当前目录不是可安全覆盖的新安装目录。" >&2
+  exit 1
+fi
+
 echo "准备启动服务..."
 
 # 本地已有同架构标签时直接复用；架构不匹配时重新拉取 DockerHub 的对应镜像。
 if [ "$FORCE_PULL" = "true" ]; then
   echo "强制拉取镜像：$IMAGE"
-  $COMPOSE pull
+  run_compose pull
 else
   if image_is_for_host "$IMAGE"; then
     echo "检测到本地镜像：$IMAGE（$TARGET_PLATFORM），跳过 XyMediaVault 拉取。"
   else
     echo "本地没有匹配 $TARGET_PLATFORM 的镜像，开始拉取：$IMAGE"
-    $COMPOSE pull xymediavault
+    run_compose pull xymediavault
   fi
 
   if image_is_for_host xiaoyaliu/alist:latest; then
     echo "检测到本地镜像：xiaoyaliu/alist:latest（$TARGET_PLATFORM），跳过小雅拉取。"
   else
     echo "本地没有匹配 $TARGET_PLATFORM 的小雅镜像，开始拉取。"
-    $COMPOSE pull xiaoya-alist
+    run_compose pull xiaoya-alist
   fi
 fi
 
-$COMPOSE up -d
+run_compose up -d
+
+restart_emby_if_media_unavailable
 
 echo
 print_access_info
