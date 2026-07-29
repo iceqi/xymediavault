@@ -77,6 +77,7 @@ detect_fuse_support() {
   FUSE_SUPPORTED="false"
   FUSE_SUPPORT_REASON="主机没有可用的 /dev/fuse"
   fuse_device_path="${FUSE_DEVICE_PATH:-/dev/fuse}"
+  probe_host_path="${1:-$FUSE_HOST_PATH}"
   if [ ! -c "$fuse_device_path" ]; then
     return 0
   fi
@@ -92,7 +93,7 @@ detect_fuse_support() {
     --device "$fuse_device_path:/dev/fuse" \
     --cap-add SYS_ADMIN \
     --security-opt apparmor=unconfined \
-    --mount "type=bind,src=$FUSE_HOST_PATH,dst=/mnt/xymediavault,bind-propagation=rshared" \
+    --mount "type=bind,src=$probe_host_path,dst=/mnt/xymediavault,bind-propagation=rshared" \
     --entrypoint /bin/true \
     "$probe_image" >/dev/null 2>&1 && \
     docker start -a "$probe_name" >/dev/null 2>&1; then
@@ -122,8 +123,14 @@ services:
       - /dev/fuse:/dev/fuse
     cap_add:
       - SYS_ADMIN
+FUSE_COMPOSE
+  if ! xymediavault_service_has_apparmor_unconfined "$INSTALL_DIR/docker-compose.yml"; then
+    cat >>"$temporary_override" <<FUSE_COMPOSE
     security_opt:
       - apparmor:unconfined
+FUSE_COMPOSE
+  fi
+  cat >>"$temporary_override" <<FUSE_COMPOSE
     volumes:
       - type: bind
         source: $fuse_source
@@ -142,9 +149,19 @@ FUSE_COMPOSE
   mv "$temporary_override" "$override_path"
 }
 
+xymediavault_service_has_apparmor_unconfined() {
+  awk '
+    BEGIN { in_service = 0; found = 0 }
+    /^  xymediavault:[[:space:]]*$/ { in_service = 1; next }
+    in_service && /^  [^[:space:]][^:]*:[[:space:]]*$/ { in_service = 0 }
+    in_service && /apparmor:unconfined/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
 print_fuse_capability() {
   if [ "$FUSE_SUPPORTED" = "true" ]; then
-    echo "媒体库挂载能力：可用（安装后在管理后台启用）"
+    echo "媒体库挂载能力：可用（首次安装将自动挂载）"
   else
     echo "媒体库挂载能力：不可用（仍可使用 WebDAV 和 TVBox）"
     [ -z "${FUSE_SUPPORT_REASON:-}" ] || echo "  原因：$FUSE_SUPPORT_REASON"
@@ -172,6 +189,19 @@ run_compose() {
   fi
 }
 # END FUSE CAPABILITY HELPERS
+
+# BEGIN INSTALL DETECTION HELPERS
+xymediavault_container_exists() {
+  docker container inspect xymediavault >/dev/null 2>&1
+}
+
+existing_install_present() {
+  [ -f "$INSTALL_DIR/docker-compose.yml" ] ||
+    [ -f "$INSTALL_DIR/config.yaml" ] ||
+    [ -f "$INSTALL_DIR/data/xymediavault.db" ] ||
+    xymediavault_container_exists
+}
+# END INSTALL DETECTION HELPERS
 
 if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
   echo "当前环境没有可用的交互终端，请在终端中执行：sh install.sh" >&2
@@ -319,13 +349,29 @@ cleanup_fuse_mounts_under() {
   if [ "$cleanup_depth" -ge 4 ]; then
     return 0
   fi
+  cleanup_failed="false"
   for cleanup_child in "$cleanup_root"/*; do
     [ "$cleanup_child" != "$cleanup_root/*" ] || continue
     # 先递归到更深的层级，保证卸载顺序是由内向外。
-    cleanup_fuse_mounts_under "$cleanup_child" "$((cleanup_depth + 1))" || true
-    cleanup_fuse_mount "$cleanup_child" || true
+    if ! cleanup_fuse_mounts_under "$cleanup_child" "$((cleanup_depth + 1))"; then
+      cleanup_failed="true"
+    fi
+    if ! cleanup_fuse_mount "$cleanup_child"; then
+      cleanup_failed="true"
+    fi
   done
-  cleanup_fuse_mount "$cleanup_root"
+  if ! cleanup_fuse_mount "$cleanup_root"; then
+    cleanup_failed="true"
+  fi
+  [ "$cleanup_failed" = "false" ]
+}
+
+cleanup_legacy_fuse_mount_if_owned() {
+  legacy_mount_path="/mnt/xymediavault"
+  [ "$legacy_mount_path" != "$FUSE_HOST_PATH" ] || return 0
+  legacy_mount_source="$(docker container inspect --format '{{range .Mounts}}{{if eq .Destination "/mnt/xymediavault"}}{{println .Source}}{{end}}{{end}}' xymediavault 2>/dev/null || true)"
+  [ "$legacy_mount_source" = "$legacy_mount_path" ] || return 0
+  cleanup_fuse_mounts_under "$legacy_mount_path"
 }
 
 # 媒体库根目录在旧版本里本身就是一个 FUSE 挂载。升级成根目录下的多个子挂载后，
@@ -523,27 +569,57 @@ if [ -z "$DETECTED_HOST" ]; then
 fi
 PUBLIC_HOST="${PUBLIC_HOST:-$DETECTED_HOST}"
 
-if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+REPAIR_EXISTING_INSTALL="false"
+if existing_install_present; then
   echo "检测到已有 XyMediaVault 安装：$INSTALL_DIR"
-  CONTINUE_UPDATE="$(prompt_bool "更新现有安装" "true")"
+  CONTINUE_UPDATE="$(prompt_bool "更新需要停止 XyMediaVault 容器并临时卸载媒体库，更新完成后会按原配置恢复。是否继续" "true")"
   if [ "$CONTINUE_UPDATE" != "true" ]; then
-    echo "已取消更新。"
+    echo "已取消更新，容器和媒体库挂载保持不变。"
     exit 0
   fi
 
-	mkdir -p "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
-	prepare_emby_config_dir
-	cd "$INSTALL_DIR"
+  mkdir -p "$INSTALL_DIR"
+  cd "$INSTALL_DIR"
 
-  detect_fuse_support
+  # 更新预检使用独立空目录，避免在停止容器前访问仍处于挂载状态的媒体目录。
+  fuse_probe_host_path="$(mktemp -d "$INSTALL_DIR/.xymediavault-fuse-probe.XXXXXX")"
+  detect_fuse_support "$fuse_probe_host_path"
+  rmdir "$fuse_probe_host_path" 2>/dev/null || true
   print_fuse_capability
   if [ "$FUSE_SUPPORTED" != "true" ] && {
-    [ -f "$INSTALL_DIR/docker-compose.fuse.yml" ] ||
-      xymediavault_service_has_fuse_declaration "$INSTALL_DIR/docker-compose.yml"
+    [ -f "$INSTALL_DIR/docker-compose.fuse.yml" ] || {
+      [ -f "$INSTALL_DIR/docker-compose.yml" ] &&
+        xymediavault_service_has_fuse_declaration "$INSTALL_DIR/docker-compose.yml"
+    }
   }; then
     echo "当前主机不支持媒体库挂载，但已有安装仍声明 FUSE 权限。为避免中断 Emby，本次更新未执行。" >&2
     exit 1
   fi
+
+  echo "停止旧 XyMediaVault 容器并卸载媒体库..."
+  if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    if ! run_compose stop xymediavault >/dev/null 2>&1; then
+      echo "无法停止旧 XyMediaVault 容器，本次更新未继续。" >&2
+      exit 1
+    fi
+  elif xymediavault_container_exists; then
+    if ! docker stop xymediavault >/dev/null 2>&1; then
+      echo "无法停止旧 XyMediaVault 容器，本次修复未继续。" >&2
+      exit 1
+    fi
+  fi
+  if ! cleanup_fuse_mounts_under "$FUSE_HOST_PATH"; then
+    exit 1
+  fi
+  if ! cleanup_legacy_fuse_mount_if_owned; then
+    exit 1
+  fi
+  mkdir -p "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
+  prepare_emby_config_dir
+
+  if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    REPAIR_EXISTING_INSTALL="true"
+  else
   if [ "$FUSE_SUPPORTED" = "true" ]; then
     write_fuse_compose_override "$INSTALL_DIR/docker-compose.fuse.yml"
   fi
@@ -556,13 +632,6 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   [ -z "$detected_webdav_port" ] || WEBDAV_PORT="$detected_webdav_port"
   [ -z "$detected_tvbox_port" ] || TVBOX_PORT="$detected_tvbox_port"
   [ -z "$detected_xiaoya_port" ] || XIAOYA_PORT="$detected_xiaoya_port"
-
-  echo "停止旧 XyMediaVault 容器..."
-  run_compose stop xymediavault >/dev/null 2>&1 || true
-  cleanup_fuse_mounts_under "$FUSE_HOST_PATH"
-  cleanup_fuse_mounts_under "/mnt/xymediavault"
-  mkdir -p "$FUSE_HOST_PATH"
-
   # 使用安装目录下的宿主机挂载点，并将其绝对路径传给后台页面展示。
   temporary_compose="$(mktemp "${TMPDIR:-/tmp}/xymediavault-compose.XXXXXX")"
   if ! awk \
@@ -652,9 +721,14 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   echo
   print_access_info
   exit 0
+  fi
 fi
 
-echo "未检测到已有安装，进入首次安装配置。"
+if [ "$REPAIR_EXISTING_INSTALL" = "true" ]; then
+  echo "检测到安装文件不完整，保留现有配置和数据库并进入修复安装。"
+else
+  echo "未检测到已有安装，进入首次安装配置。"
+fi
 echo "每一项都提供默认值，不输入内容直接按回车即可使用默认值。"
 echo
 
@@ -689,16 +763,18 @@ if [ "$CONTINUE_INSTALL" != "true" ]; then
   exit 0
 fi
 
-mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$FUSE_HOST_PATH" "$EMBY_HOST_PATH/config"
+mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$EMBY_HOST_PATH/config"
+if ! cleanup_fuse_mounts_under "$FUSE_HOST_PATH"; then
+  exit 1
+fi
+mkdir -p "$FUSE_HOST_PATH"
 prepare_emby_config_dir
 cd "$INSTALL_DIR"
 
-detect_fuse_support
+fuse_probe_host_path="$(mktemp -d "$INSTALL_DIR/.xymediavault-fuse-probe.XXXXXX")"
+detect_fuse_support "$fuse_probe_host_path"
+rmdir "$fuse_probe_host_path" 2>/dev/null || true
 print_fuse_capability
-
-# 旧版本异常退出可能留下媒体库坏挂载，确认清理完成后再交给 Docker 做 bind mount。
-cleanup_fuse_mounts_under "$FUSE_HOST_PATH"
-mkdir -p "$FUSE_HOST_PATH"
 
 WRITE_CONFIG="true"
 if [ -f config.yaml ]; then
@@ -736,6 +812,7 @@ tvbox:
   token_key_file: /app/data/tvbox-token.key
 
 fuse:
+  auto_mount: ${FUSE_SUPPORTED}
   mount_path: /mnt/xymediavault
 
 xiaoya:

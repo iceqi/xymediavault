@@ -2,13 +2,14 @@
 
 XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 的媒体资源管理服务，提供媒体索引、WebDAV、媒体库挂载、TVBox 接口、小雅授权管理和 Emby 容器管理等能力。
 
-> 本项目为闭源软件。公开仓库仅提供安装脚本、使用文档和必要的公开资源，不提供产品源代码、构建流程或开发文档。
+> 本项目为闭源软件。请通过官方镜像和安装脚本部署，未经授权不提供源码再分发。
 
 ## 主要功能
 
 - 扫描媒体目录并建立本地索引，减少媒体服务器重复访问远程目录。
+- 使用媒体视图组合和整理多个索引目录，并批量添加目录来源。
 - 提供只读 WebDAV，供 Emby、Jellyfin、Infuse 等客户端挂载。
-- 提供媒体库挂载目录，供宿主机上的媒体服务器直接使用。
+- 提供单一全局媒体库挂载，可在索引目录和媒体视图两种模式间切换。
 - 提供 TVBox JSON CMS 服务、独立用户、设备令牌和目录权限。
 - 托管小雅 Alist 的授权、状态、启停、重启和实时日志。
 - 可选安装并管理 Emby，包括更新、启停、重启和实时日志。
@@ -20,7 +21,7 @@ XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 的媒体资源�
 - 已安装并启动 Docker。
 - 已安装 Docker Compose V2 或 `docker-compose`。
 - 支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`。
-- 使用媒体库挂载时，宿主机需要支持 FUSE、`/dev/fuse` 和共享挂载传播。
+- 安装脚本会自动检测媒体库挂载能力；使用本地挂载时，宿主机需要支持 FUSE、`/dev/fuse` 和共享挂载传播。
 - 建议预留管理后台、WebDAV、TVBox 和小雅 Alist 所需端口。
 
 默认端口：
@@ -80,7 +81,7 @@ sh install.sh /指定目录
 - 小雅 Alist、管理和代理端口
 - 是否强制拉取最新镜像
 
-脚本自动识别 Docker 服务器架构并拉取对应的 `iceqi/xymediavault:latest` 镜像，同时自动检测媒体库挂载能力。实际挂载由管理后台控制，不再由首次安装选项决定。
+脚本自动识别 Docker 服务器架构并拉取对应的 `iceqi/xymediavault:latest` 镜像，同时自动检测媒体库挂载能力。首次安装检测可用时会自动挂载，之后可在管理后台控制。
 
 ## 更新
 
@@ -125,6 +126,15 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediav
 
 系统不会下载视频文件。STRM 内容在需要时读取并保存相对播放路径；NFO、海报、字幕等辅助文件按配置从远程源读取。
 
+## 媒体视图
+
+媒体视图用于把多个索引目录组织成面向媒体服务器的目录结构。“媒体视图”页面提供三栏工作区：左侧管理视图，中间管理目标目录，右侧搜索和多选索引目录并批量添加来源。同一视图可以递归合并多个来源。
+
+对外提供媒体目录时可以选择：
+
+- **索引目录模式**：直接使用完整的媒体索引目录树。
+- **媒体视图模式**：使用一个已启用的媒体视图及其整理后的目录树。
+
 ## WebDAV
 
 1. 在“WebDAV”页面创建账号。
@@ -137,7 +147,7 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediav
 密码：后台设置的 WebDAV 密码
 ```
 
-WebDAV 为只读媒体视图。是否显示隐藏目录由账号的独立开关控制。
+每个 WebDAV 用户可以独立选择“索引目录模式”或“媒体视图模式”；后者需要选择一个已启用的媒体视图。播放服务、路径前缀权限和隐藏目录开关仍按用户独立生效，路径权限应用在所选模式提供的目录树之上。WebDAV 始终只读。
 
 ## 媒体库挂载
 
@@ -147,7 +157,7 @@ WebDAV 为只读媒体视图。是否显示隐藏目录由账号的独立开关�
 安装目录/mnt/xymediavault
 ```
 
-全局挂载可以选择“索引目录模式”，或选择一个已启用视图的“媒体视图模式”。Emby、Jellyfin 或其他宿主机应用可以把该目录作为媒体库路径。
+全局挂载可以选择“索引目录模式”，或选择一个已启用视图的“媒体视图模式”。Emby、Jellyfin 或其他宿主机应用可以把该目录作为媒体库路径；托管的 Emby 也共享同一个全局媒体根目录，不会创建第二套挂载。
 
 安装脚本会自动检测宿主机能否向容器提供 FUSE 设备、权限和共享挂载。检测不可用时不会加入相关高权限配置，XyMediaVault 仍可使用 WebDAV 和 TVBox；实际挂载由管理后台控制。
 
@@ -181,6 +191,12 @@ CMS 地址：http://服务器IP:18082/api/tvbox/cms/设备令牌
 - 同步默认播放服务
 
 小雅授权文件保存在安装目录的 `xiaoya` 目录中。迁移服务器时应一并备份该目录。
+
+### 小雅 STRM 索引
+
+“媒体资源”页面可以手动创建“扫描小雅 STRM 索引”任务，并可选择同时预缓存 NFO。任务异步运行，进度、专项统计、失败信息和重试状态统一显示在“任务中心”。
+
+“系统设置”提供独立的每日小雅 STRM 扫描设置，可配置每天的执行时间及是否预缓存 NFO。每日任务与手动任务使用同一索引写入控制，避免两个扫描同时修改媒体索引。
 
 ## Emby
 
@@ -231,6 +247,22 @@ docker compose start xymediavault
 ```
 
 不要只复制正在写入的 SQLite 主文件而忽略同目录中的 `-wal` 和 `-shm` 文件。
+
+## 发布 Docker 镜像
+
+发布脚本仅支持 Linux 发布主机，固定发布 `iceqi/xymediavault:latest` 的 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7` 镜像。运行前需要 Docker Buildx、可执行 privileged binfmt 安装的 Docker 权限、`sqlite3`、`curl`、`jq`，以及常见 GNU/BusyBox 工具；还需要登录 DockerHub，并准备一个完整、只读的旧版 SQLite 备份：
+
+```bash
+mkdir -p /安全的备份目录
+sqlite3 data/xymediavault.db ".backup '/安全的备份目录/xymediavault.db'"
+chmod a-w /安全的备份目录/xymediavault.db
+
+OLD_DB_PATH=/安全的备份目录/xymediavault.db sh scripts/publish-dockerhub.sh
+```
+
+发布仓库固定为 `iceqi/xymediavault`，不能通过环境变量改为其他仓库；`CANDIDATE_TAG` 可用于指定不可变候选标签。默认 candidate 标签包含 UUID 随机片段；远端已存在同名 candidate 时脚本会拒绝覆盖。Registry 标签没有 compare-and-swap 语义，因此脚本同时使用高熵标签、fail-closed inspect 和本机原子发布锁。只有 registry 返回与当前 ref/tag 严格匹配的明确不存在错误时才继续，其他错误都会中止发布。发布要求当前 `latest` 已存在；脚本会保存其 digest，并在 promotion 前再次确认它未被其他发布者修改。
+
+Buildx metadata 中的本次构建 digest 是发布流程的不可变信任根。push 后 candidate 标签的 digest 必须与它一致；逐平台容器验证和 promotion 也只使用该 digest。脚本只在 candidate 的三个平台都通过空库启动、旧库迁移语义保留检查、健康检查、迁移标记与关键 schema 检查，以及 SQLite 完整性检查后，才提升 `latest`。每个平台都会从 candidate digest 启动内置的只读 Go `verify-migration` 验证器；它复用应用的媒体内容和虚拟路径规范化规则，确认媒体文件、metadata、NFO、genre 关联以及媒体视图 folder/source 的旧语义身份仍有代表，同时允许迁移合法去重。其他持久表继续要求迁移后计数不减少。promotion 命令或后续核验失败时，脚本会自动尝试把 `latest` 恢复到原 digest，并 inspect 核验恢复结果。Registry 标签更新不是原子事务，因此该机制是经过核验的 best-effort 回滚，而不是绝对原子发布。验证容器仅以只读方式挂载临时的迁移前后数据库，不挂载生产数据库、媒体库目录、小雅目录或 Docker Socket。
 
 ## 常见问题
 
