@@ -3,7 +3,7 @@ set -eu
 
 # XyMediaVault 一键部署脚本。
 # 示例：
-#   curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+#   curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh
 # 所有部署参数都会在安装时逐项询问，环境变量只用于修改提示中的建议值。
 
 prompt_value() {
@@ -773,6 +773,7 @@ if existing_install_present; then
       print "      XYMEDIAVAULT_EMBY_HOST_PATH: " yaml_quote(emby_host_path)
       print "      XYMEDIAVAULT_TMM_HOST_PATH: " yaml_quote(tmm_host_path)
       print "      XYMEDIAVAULT_TMM_LOCAL_PATH: \"/app/tmm\""
+      print "      XYMEDIA_TMM_IMAGE: \"iceqi/xymedia-tmm:beta\""
     }
     {
       lines[NR] = $0
@@ -822,7 +823,7 @@ if existing_install_present; then
 
         in_runtime_environment = environment_line && i > environment_line && i < service_end
         if (in_runtime_environment && line ~ /^    [^[:space:]]/) in_runtime_environment = 0
-        if (in_runtime_environment && line ~ /^      (TZ|XYMEDIAVAULT_FUSE_HOST_PATH|XYMEDIAVAULT_XIAOYA_HOST_PATH|XYMEDIAVAULT_EMBY_HOST_PATH|XYMEDIAVAULT_TMM_HOST_PATH|XYMEDIAVAULT_TMM_LOCAL_PATH):/) {
+        if (in_runtime_environment && line ~ /^      (TZ|XYMEDIAVAULT_FUSE_HOST_PATH|XYMEDIAVAULT_XIAOYA_HOST_PATH|XYMEDIAVAULT_EMBY_HOST_PATH|XYMEDIAVAULT_TMM_HOST_PATH|XYMEDIAVAULT_TMM_LOCAL_PATH|XYMEDIA_TMM_IMAGE):/) {
           continue
         }
 
@@ -886,7 +887,7 @@ fi
 echo "每一项都提供默认值，不输入内容直接按回车即可使用默认值。"
 echo
 
-IMAGE="$(prompt_value "Docker 镜像" "${IMAGE:-iceqi/xymediavault:latest}")"
+IMAGE="$(prompt_value "Docker 镜像（Beta，勿用于稳定环境）" "${IMAGE:-iceqi/xymediavault:beta}")"
 PUBLIC_HOST="$(prompt_value "服务器访问 IP 或域名" "${PUBLIC_HOST:-$DETECTED_HOST}")"
 API_PORT="$(prompt_value "管理后台端口" "${API_PORT:-18080}")"
 WEBDAV_PORT="$(prompt_value "WebDAV 端口" "${WEBDAV_PORT:-18081}")"
@@ -995,6 +996,7 @@ services:
       XYMEDIAVAULT_EMBY_HOST_PATH: "${EMBY_HOST_PATH}"
       XYMEDIAVAULT_TMM_HOST_PATH: "${INSTALL_DIR}/tmm"
       XYMEDIAVAULT_TMM_LOCAL_PATH: "/app/tmm"
+      XYMEDIA_TMM_IMAGE: "${XYMEDIA_TMM_IMAGE:-iceqi/xymedia-tmm:beta}"
     ports:
       - "${API_PORT}:8080"
       - "${WEBDAV_PORT}:8081"

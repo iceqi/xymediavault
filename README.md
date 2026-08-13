@@ -1,4 +1,4 @@
-# XyMediaVault
+# XyMediaVault Beta
 
 XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 的媒体资源管理服务，提供媒体索引、WebDAV、媒体库挂载、TVBox 接口、小雅授权管理和 Emby 容器管理等能力。
 
@@ -38,7 +38,13 @@ XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 的媒体资源�
 先进入希望保存 XyMediaVault 数据的目录，再执行：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh
+```
+
+这是 beta 测试安装命令，默认使用 `iceqi/xymediavault:beta`，不会覆盖 `latest`。如需显式指定镜像，环境变量必须传给脚本：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | env IMAGE=iceqi/xymediavault:beta sh
 ```
 
 不指定目录时，安装目录严格使用执行命令时的当前目录。脚本不会默认安装到 `/opt`，也不会读取环境中的 `INSTALL_DIR` 作为默认路径。
@@ -48,7 +54,7 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediav
 ```bash
 mkdir -p "$HOME/XyMediaVault"
 cd "$HOME/XyMediaVault"
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh
 ```
 
 ### 指定安装目录
@@ -81,7 +87,7 @@ sh install.sh /指定目录
 - 小雅 Alist、管理和代理端口
 - 是否强制拉取最新镜像
 
-脚本自动识别 Docker 服务器架构并拉取对应的 `iceqi/xymediavault:latest` 镜像，同时自动检测媒体库挂载能力。首次安装检测可用时会自动挂载，之后可在管理后台控制。
+脚本自动识别 Docker 服务器架构并拉取对应的 `iceqi/xymediavault:beta` 镜像，同时自动检测媒体库挂载能力。首次安装检测可用时会自动挂载，之后可在管理后台控制。主服务默认管理 `iceqi/xymedia-tmm:beta`，稳定镜像和 `latest` 不会被 beta 安装覆盖。
 
 ## 更新
 
