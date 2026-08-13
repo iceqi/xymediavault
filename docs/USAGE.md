@@ -28,28 +28,32 @@ docker-compose version
 
 建议提前放行需要使用的端口。默认管理后台为 `18080`，WebDAV 为 `18081`，TVBox 为 `18082`，小雅 Alist 为 `5678`，小雅管理和代理端口为 `2345`、`2346`。
 
-## 2. 一键安装
+## 2. 统一安装器
 
-直接执行一键安装：
-
-```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
-```
-
-如果希望先检查脚本内容，也可以下载后再执行：
+下载仓库或 release bundle 后执行：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
-sh install.sh
+git clone --branch beta https://github.com/iceqi/xymediavault.git
+cd xymediavault
+bash scripts/install.sh
 ```
 
-脚本必须在交互式终端中执行，因为所有部署参数都会逐项确认。安装目录留空时使用当前执行目录；也可以在提示中输入绝对路径或相对路径，或通过第一个位置参数指定建议值：
+必须下载完整 bundle；不要只下载 `install.sh`，因为入口依赖 `scripts/lib`。
+
+无参数脚本只有在 stdin/stdout 都是 TTY 时进入菜单；pipe 环境显示帮助并返回 2。完整 bundle 必须包含 `scripts/lib`，不要只下载入口文件。
+
+标准子命令：
 
 ```bash
-sh install.sh /opt/xymediavault
+bash scripts/install.sh vault install --channel stable --dir /opt/xymediavault --non-interactive
+bash scripts/install.sh vault upgrade --channel stable --yes
+bash scripts/install.sh title install --channel beta --yes
+bash scripts/install.sh env
+bash scripts/install.sh version
+bash scripts/install.sh status --json
 ```
 
-### 安装参数
+### 菜单与通道
 
 | 参数 | 说明 | 建议值 |
 | --- | --- | --- |
@@ -64,7 +68,7 @@ sh install.sh /opt/xymediavault
 | `XIAOYA_PROXY_PORT` | 小雅代理端口 | `2346` |
 | `FORCE_PULL` | 是否忽略本地镜像并强制拉取 | `false` |
 
-脚本会自动识别 Docker 的运行架构，目前支持 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7`。Docker 会从同一个 `iceqi/xymediavault:latest` 标签选择正确镜像，不需要用户手动指定架构。脚本也会自动检测本机是否具备 FUSE 设备、容器权限和共享挂载传播能力，不再提供手动启用选项。
+菜单数字固定为 1-10 和 0 退出。stable 使用 Vault `latest`、TMM `latest`、Title `stable`；beta 使用三个对应的 `beta` 标签。`.xymedia-channel` 保存安装通道，升级通过 pull 和容器状态检查判断结果，网络/registry 不可用时不声称“最新”。
 
 环境变量只修改交互提示中的建议值，脚本仍会要求用户确认。例如：
 
@@ -141,15 +145,17 @@ FUSE 依赖：
 
 安装脚本会自动验证 `/dev/fuse`、Docker 运行模式、`SYS_ADMIN`、AppArmor 和 `rshared` bind。检测通过时才生成安装器管理的 FUSE Compose 配置；检测不可用时不会授予相关高权限，管理后台、WebDAV 和 TVBox 仍可使用。实际挂载和卸载继续由管理后台控制。
 
-## 7. 更新
+## 7. 更新与 Title
 
-重新下载并执行最新脚本：
+使用统一子命令：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /opt/xymediavault
+bash scripts/install.sh vault check
+bash scripts/install.sh vault upgrade --channel stable --yes
+bash scripts/install.sh title check
 ```
 
-脚本检测到安装目录下存在 `docker-compose.yml` 后会进入更新流程。配置、数据库、小雅授权文件、Emby 配置和 TMM 数据会被保留。更新只替换 XyMediaVault 主容器；TMM 继续运行在由应用管理的独立 bridge 网络中。
+Vault 更新保留数据、配置、FUSE 目录和 TMM；切换通道会备份数据库并在健康检查失败时恢复旧 Compose。独立 Title 不抢占 Vault 的 `xymedia-title`，只使用 `xymedia-title-standalone`。Vault-owned Title 必须从 Vault 管理接口升级，独立脚本拒绝删除它。
 
 ## 8. 日常维护
 

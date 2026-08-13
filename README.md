@@ -33,18 +33,20 @@ XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 的媒体资源�
 | TVBox | 18082 | `http://服务器IP:18082` |
 | 小雅 Alist | 5678 | `http://服务器IP:5678` |
 
-## 一键安装
+## 统一安装器
 
-先进入希望保存 XyMediaVault 数据的目录，再执行：
+先下载完整脚本 bundle，再在目标主机执行。入口必须和 `scripts/lib` 一起保存：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh
+git clone --branch beta https://github.com/iceqi/xymediavault.git
+cd xymediavault
+bash scripts/install.sh
 ```
 
-这是 beta 测试安装命令，默认使用 `iceqi/xymediavault:beta`，不会覆盖 `latest`。如需显式指定镜像，环境变量必须传给脚本：
+无参数且终端可交互时进入统一数字菜单；无 TTY 时显示帮助并返回 2，不支持 `curl | sh` 菜单安装。Beta 使用 `iceqi/xymediavault:beta`，不会覆盖 `latest`。
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | env IMAGE=iceqi/xymediavault:beta sh
+bash scripts/install.sh vault install --channel beta --dir /opt/xymediavault --non-interactive
 ```
 
 不指定目录时，安装目录严格使用执行命令时的当前目录。脚本不会默认安装到 `/opt`，也不会读取环境中的 `INSTALL_DIR` 作为默认路径。
@@ -54,29 +56,29 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediav
 ```bash
 mkdir -p "$HOME/XyMediaVault"
 cd "$HOME/XyMediaVault"
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh
+bash scripts/install.sh
 ```
 
-### 指定安装目录
+### CLI 示例
 
-一键命令可以把目录作为第一个参数传给脚本：
+统一入口也支持稳定子命令：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /指定目录
+bash scripts/install.sh vault check
+bash scripts/install.sh vault upgrade --channel stable --yes
+bash scripts/install.sh title install --channel beta --yes
+bash scripts/install.sh env
+bash scripts/install.sh status --json
+bash scripts/install.sh uninstall title --yes
 ```
-
-也可以先下载脚本：
-
-```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh -o install.sh
-sh install.sh /指定目录
-```
-
-相对目录会基于当前执行目录转换为绝对路径。
 
 ### 安装选项
 
-脚本会交互询问以下内容，直接按回车使用显示的默认值：
+菜单项 1-10 固定，分别覆盖 Vault stable、Vault beta、检查升级、切换通道、Title 安装、Title 检查升级、环境、版本、状态和卸载维护。菜单只是调用上述子命令。
+
+Vault stable 和 beta 不能在同一台主机以固定容器名并存；通道记录在安装目录 `.xymedia-channel`。升级会先拉取目标镜像、备份 SQLite、重建并健康检查，失败时恢复 Compose 和旧容器。Title 独立服务使用 `xymedia-title-standalone`、`127.0.0.1:18083`、非 root、只读根文件系统、tmpfs 和丢弃 capability；发现 Vault-owned 或 foreign 的 `xymedia-title` 时拒绝操作。
+
+旧版 `bash install.sh /path` 仍会映射到 stable 安装并输出弃用警告；旧的完整交互逻辑保存在 `scripts/legacy-install.sh`，用于兼容既有迁移/FUSE 场景。
 
 - 安装目录
 - Docker 镜像
@@ -95,13 +97,13 @@ sh install.sh /指定目录
 
 ```bash
 cd /你的/XyMediaVault/安装目录
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+bash scripts/install.sh vault upgrade --channel stable --yes
 ```
 
 也可以在任意目录显式指定已有安装目录：
 
 ```bash
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /你的/XyMediaVault/安装目录
+bash scripts/install.sh vault upgrade --dir /你的/XyMediaVault --yes
 ```
 
 更新过程会保留数据库、系统配置、小雅授权文件、Emby 配置和 TMM 数据。更新前会停止 XyMediaVault，并检查媒体库目录是否存在残留 FUSE 挂载；检测到挂载时会先卸载，再重建主容器并自动重新挂载。TMM 使用由应用管理的独立 bridge 网络，更新主容器时不会删除或重建 TMM 容器。
@@ -277,7 +279,7 @@ docker compose version
 ```bash
 docker compose stop xymediavault
 umount -l ./mnt/xymediavault
-curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+bash scripts/install.sh vault upgrade --channel stable --yes
 ```
 
 ### 端口被占用
