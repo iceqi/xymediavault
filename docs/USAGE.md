@@ -149,7 +149,7 @@ FUSE 依赖：
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /opt/xymediavault
 ```
 
-脚本检测到安装目录下存在 `docker-compose.yml` 后会进入更新流程。配置、数据库和小雅授权文件会被保留。
+脚本检测到安装目录下存在 `docker-compose.yml` 后会进入更新流程。配置、数据库、小雅授权文件、Emby 配置和 TMM 数据会被保留。更新只替换 XyMediaVault 主容器；TMM 继续运行在由应用管理的独立 bridge 网络中。
 
 ## 8. 日常维护
 
@@ -194,6 +194,8 @@ docker compose restart xymediavault
 /opt/xymediavault/docker-compose.yml
 /opt/xymediavault/data/
 /opt/xymediavault/xiaoya/
+/opt/xymediavault/emby/config/
+/opt/xymediavault/tmm/data/
 ```
 
 复制 SQLite 数据库前，建议先停止 XyMediaVault，避免只复制主数据库而遗漏 WAL 中尚未合并的数据：

@@ -98,7 +98,7 @@ curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediav
 curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh -s -- /你的/XyMediaVault/安装目录
 ```
 
-更新过程会保留数据库、系统配置、小雅授权文件和 Emby 配置。更新前会停止 XyMediaVault，并检查媒体库目录是否存在残留 FUSE 挂载；检测到挂载时会先卸载，再重建容器并自动重新挂载。
+更新过程会保留数据库、系统配置、小雅授权文件、Emby 配置和 TMM 数据。更新前会停止 XyMediaVault，并检查媒体库目录是否存在残留 FUSE 挂载；检测到挂载时会先卸载，再重建主容器并自动重新挂载。TMM 使用由应用管理的独立 bridge 网络，更新主容器时不会删除或重建 TMM 容器。
 
 ## 首次使用
 
@@ -230,6 +230,7 @@ Emby 默认不安装，需要在“Emby 管理”页面主动安装。
 data/                 XyMediaVault 数据库和运行数据
 xiaoya/               小雅授权、Cookie 和分享配置
 emby/config/          Emby 配置
+tmm/data/             TMM 配置、许可证信息、缓存和元数据状态
 config.yaml           服务配置
 docker-compose.yml    容器部署配置
 ```
@@ -247,22 +248,6 @@ docker compose start xymediavault
 ```
 
 不要只复制正在写入的 SQLite 主文件而忽略同目录中的 `-wal` 和 `-shm` 文件。
-
-## 发布 Docker 镜像
-
-发布脚本仅支持 Linux 发布主机，固定发布 `iceqi/xymediavault:latest` 的 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7` 镜像。运行前需要 Docker Buildx、可执行 privileged binfmt 安装的 Docker 权限、`sqlite3`、`curl`、`jq`，以及常见 GNU/BusyBox 工具；还需要登录 DockerHub，并准备一个完整、只读的旧版 SQLite 备份：
-
-```bash
-mkdir -p /安全的备份目录
-sqlite3 data/xymediavault.db ".backup '/安全的备份目录/xymediavault.db'"
-chmod a-w /安全的备份目录/xymediavault.db
-
-OLD_DB_PATH=/安全的备份目录/xymediavault.db sh scripts/publish-dockerhub.sh
-```
-
-发布仓库固定为 `iceqi/xymediavault`，不能通过环境变量改为其他仓库；`CANDIDATE_TAG` 可用于指定不可变候选标签。默认 candidate 标签包含 UUID 随机片段；远端已存在同名 candidate 时脚本会拒绝覆盖。Registry 标签没有 compare-and-swap 语义，因此脚本同时使用高熵标签、fail-closed inspect 和本机原子发布锁。只有 registry 返回与当前 ref/tag 严格匹配的明确不存在错误时才继续，其他错误都会中止发布。发布要求当前 `latest` 已存在；脚本会保存其 digest，并在 promotion 前再次确认它未被其他发布者修改。
-
-Buildx metadata 中的本次构建 digest 是发布流程的不可变信任根。push 后 candidate 标签的 digest 必须与它一致；逐平台容器验证和 promotion 也只使用该 digest。脚本只在 candidate 的三个平台都通过空库启动、旧库迁移语义保留检查、健康检查、迁移标记与关键 schema 检查，以及 SQLite 完整性检查后，才提升 `latest`。每个平台都会从 candidate digest 启动内置的只读 Go `verify-migration` 验证器；它复用应用的媒体内容和虚拟路径规范化规则，确认媒体文件、metadata、NFO、genre 关联以及媒体视图 folder/source 的旧语义身份仍有代表，同时允许迁移合法去重。其他持久表继续要求迁移后计数不减少。promotion 命令或后续核验失败时，脚本会自动尝试把 `latest` 恢复到原 digest，并 inspect 核验恢复结果。Registry 标签更新不是原子事务，因此该机制是经过核验的 best-effort 回滚，而不是绝对原子发布。验证容器仅以只读方式挂载临时的迁移前后数据库，不挂载生产数据库、媒体库目录、小雅目录或 Docker Socket。
 
 ## 常见问题
 

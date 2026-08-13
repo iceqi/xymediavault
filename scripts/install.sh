@@ -203,6 +203,122 @@ existing_install_present() {
 }
 # END INSTALL DETECTION HELPERS
 
+# BEGIN LEGACY TMM UPDATE HELPERS
+TMM_UPDATE_REMOVED="false"
+TMM_UPDATE_SNAPSHOT_DIR=""
+TMM_UPDATE_ENV_FILE=""
+TMM_UPDATE_IMAGE=""
+TMM_UPDATE_DATA_SOURCE=""
+TMM_UPDATE_RESTART_POLICY="no"
+TMM_UPDATE_WAS_RUNNING="false"
+TMM_UPDATE_RESTORED="false"
+
+cleanup_tmm_update_snapshot() {
+  if [ -n "$TMM_UPDATE_SNAPSHOT_DIR" ] && [ -d "$TMM_UPDATE_SNAPSHOT_DIR" ]; then
+    [ -z "$TMM_UPDATE_ENV_FILE" ] || rm -f "$TMM_UPDATE_ENV_FILE"
+    rmdir "$TMM_UPDATE_SNAPSHOT_DIR" 2>/dev/null || true
+  fi
+  TMM_UPDATE_SNAPSHOT_DIR=""
+  TMM_UPDATE_ENV_FILE=""
+}
+
+legacy_tmm_shares_xymediavault_network() {
+  parent_container_id="$(docker container inspect --format '{{.Id}}' xymediavault 2>/dev/null || true)"
+  case "$parent_container_id" in
+    "" | *[!0-9a-fA-F]*) return 1 ;;
+  esac
+
+  tmm_network_mode="$(docker container inspect --format '{{.HostConfig.NetworkMode}}' xymediavault-tmm 2>/dev/null || true)"
+  case "$tmm_network_mode" in
+    container:xymediavault) return 0 ;;
+    container:*) tmm_network_target="${tmm_network_mode#container:}" ;;
+    *) return 1 ;;
+  esac
+
+  case "$tmm_network_target" in
+    "" | *[!0-9a-fA-F]*) return 1 ;;
+  esac
+  [ "${#tmm_network_target}" -ge 12 ] || return 1
+
+  resolved_network_target_id="$(docker container inspect --format '{{.Id}}' "$tmm_network_target" 2>/dev/null || true)"
+  [ -n "$resolved_network_target_id" ] && [ "$resolved_network_target_id" = "$parent_container_id" ]
+}
+
+snapshot_legacy_tmm_for_parent_replacement() {
+  TMM_UPDATE_REMOVED="false"
+  TMM_UPDATE_RESTORED="false"
+  if ! docker container inspect xymediavault-tmm >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! legacy_tmm_shares_xymediavault_network; then
+    return 0
+  fi
+
+  TMM_UPDATE_SNAPSHOT_DIR="$(mktemp -d "$INSTALL_DIR/.xymediavault-tmm-update.XXXXXX")"
+  chmod 700 "$TMM_UPDATE_SNAPSHOT_DIR"
+  TMM_UPDATE_ENV_FILE="$TMM_UPDATE_SNAPSHOT_DIR/env.list"
+  if ! (umask 077 && docker container inspect --format '{{range .Config.Env}}{{println .}}{{end}}' xymediavault-tmm >"$TMM_UPDATE_ENV_FILE"); then
+    cleanup_tmm_update_snapshot
+    echo "读取旧版 TMM 容器环境配置失败，本次更新未继续。" >&2
+    return 1
+  fi
+
+  TMM_UPDATE_IMAGE="$(docker container inspect --format '{{.Config.Image}}' xymediavault-tmm 2>/dev/null || true)"
+  TMM_UPDATE_DATA_SOURCE="$(docker container inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{println .Source}}{{end}}{{end}}' xymediavault-tmm 2>/dev/null || true)"
+  TMM_UPDATE_RESTART_POLICY="$(docker container inspect --format '{{.HostConfig.RestartPolicy.Name}}' xymediavault-tmm 2>/dev/null || true)"
+  TMM_UPDATE_WAS_RUNNING="$(docker container inspect --format '{{.State.Running}}' xymediavault-tmm 2>/dev/null || true)"
+  [ -n "$TMM_UPDATE_RESTART_POLICY" ] || TMM_UPDATE_RESTART_POLICY="no"
+  if [ -z "$TMM_UPDATE_IMAGE" ] || [ -z "$TMM_UPDATE_DATA_SOURCE" ]; then
+    cleanup_tmm_update_snapshot
+    echo "旧版 TMM 容器缺少镜像或 /data 挂载信息，本次更新未继续。" >&2
+    return 1
+  fi
+
+  if ! docker rm -f xymediavault-tmm >/dev/null 2>&1; then
+    cleanup_tmm_update_snapshot
+    echo "临时移除旧版 TMM 容器失败，本次更新未继续。" >&2
+    return 1
+  fi
+  TMM_UPDATE_REMOVED="true"
+}
+
+restore_legacy_tmm_after_parent_replacement() {
+  [ "$TMM_UPDATE_REMOVED" = "true" ] || return 0
+  if ! docker container inspect xymediavault >/dev/null 2>&1; then
+    echo "主容器不存在，暂时无法恢复旧版 TMM 容器。" >&2
+    return 1
+  fi
+
+  if ! docker container inspect xymediavault-tmm >/dev/null 2>&1; then
+    if ! docker create \
+      --name xymediavault-tmm \
+      --restart "$TMM_UPDATE_RESTART_POLICY" \
+      --network container:xymediavault \
+      --env-file "$TMM_UPDATE_ENV_FILE" \
+      -v "$TMM_UPDATE_DATA_SOURCE:/data" \
+      "$TMM_UPDATE_IMAGE" >/dev/null; then
+      echo "重新创建旧版 TMM 容器失败，安全快照仍保留在安装目录。" >&2
+      return 1
+    fi
+  fi
+  if [ "$TMM_UPDATE_WAS_RUNNING" = "true" ] && ! docker start xymediavault-tmm >/dev/null; then
+    echo "重新启动旧版 TMM 容器失败，安全快照仍保留在安装目录。" >&2
+    return 1
+  fi
+
+  TMM_UPDATE_REMOVED="false"
+  TMM_UPDATE_RESTORED="true"
+  cleanup_tmm_update_snapshot
+}
+
+restore_legacy_tmm_after_failed_update() {
+  docker start xymediavault >/dev/null 2>&1 || true
+  [ "$TMM_UPDATE_REMOVED" = "true" ] || return 0
+  restore_legacy_tmm_after_parent_replacement || true
+}
+# END LEGACY TMM UPDATE HELPERS
+
 if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
   echo "当前环境没有可用的交互终端，请在终端中执行：sh install.sh" >&2
   exit 1
@@ -580,6 +696,7 @@ if existing_install_present; then
 
   mkdir -p "$INSTALL_DIR"
   cd "$INSTALL_DIR"
+  mkdir -p "$INSTALL_DIR/tmm/data"
 
   # 更新预检使用独立空目录，避免在停止容器前访问仍处于挂载状态的媒体目录。
   fuse_probe_host_path="$(mktemp -d "$INSTALL_DIR/.xymediavault-fuse-probe.XXXXXX")"
@@ -595,6 +712,11 @@ if existing_install_present; then
     echo "当前主机不支持媒体库挂载，但已有安装仍声明 FUSE 权限。为避免中断 Emby，本次更新未执行。" >&2
     exit 1
   fi
+
+  if ! snapshot_legacy_tmm_for_parent_replacement; then
+    exit 1
+  fi
+  trap 'restore_legacy_tmm_after_failed_update' 0
 
   echo "停止旧 XyMediaVault 容器并卸载媒体库..."
   if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
@@ -637,7 +759,8 @@ if existing_install_present; then
   if ! awk \
     -v fuse_host_path="$FUSE_HOST_PATH" \
     -v xiaoya_host_path="$INSTALL_DIR/xiaoya" \
-    -v emby_host_path="$EMBY_HOST_PATH" '
+    -v emby_host_path="$EMBY_HOST_PATH" \
+    -v tmm_host_path="$INSTALL_DIR/tmm" '
     function yaml_quote(value) {
       gsub(/\\/, "\\\\", value)
       gsub(/"/, "\\\"", value)
@@ -648,6 +771,8 @@ if existing_install_present; then
       print "      XYMEDIAVAULT_FUSE_HOST_PATH: " yaml_quote(fuse_host_path)
       print "      XYMEDIAVAULT_XIAOYA_HOST_PATH: " yaml_quote(xiaoya_host_path)
       print "      XYMEDIAVAULT_EMBY_HOST_PATH: " yaml_quote(emby_host_path)
+      print "      XYMEDIAVAULT_TMM_HOST_PATH: " yaml_quote(tmm_host_path)
+      print "      XYMEDIAVAULT_TMM_LOCAL_PATH: \"/app/tmm\""
     }
     {
       lines[NR] = $0
@@ -657,6 +782,8 @@ if existing_install_present; then
       service_end = NR + 1
       environment_line = 0
       container_line = 0
+      volumes_line = 0
+      tmm_volume_present = 0
 
       for (i = 1; i <= NR; i++) {
         if (lines[i] ~ /^  xymediavault:[[:space:]]*$/) {
@@ -673,6 +800,17 @@ if existing_install_present; then
       for (i = service_start + 1; i < service_end; i++) {
         if (lines[i] ~ /^    container_name:[[:space:]]*/) container_line = i
         if (lines[i] ~ /^    environment:[[:space:]]*$/) environment_line = i
+        if (lines[i] ~ /^    volumes:[[:space:]]*$/) {
+          volumes_line = i
+          in_volumes = 1
+          continue
+        }
+        if (in_volumes && lines[i] ~ /^    [^[:space:]]/) in_volumes = 0
+        mount_line = lines[i]
+        sub(/[[:space:]]*#.*/, "", mount_line)
+        gsub(/["\047]/, "", mount_line)
+        if (mount_line ~ /:\/app\/tmm([:]|[[:space:]]|$)/) tmm_volume_present = 1
+        if (in_volumes && mount_line ~ /^[[:space:]]*target:[[:space:]]*\/app\/tmm[[:space:]]*$/) tmm_volume_present = 1
       }
 
       for (i = 1; i <= NR; i++) {
@@ -684,11 +822,17 @@ if existing_install_present; then
 
         in_runtime_environment = environment_line && i > environment_line && i < service_end
         if (in_runtime_environment && line ~ /^    [^[:space:]]/) in_runtime_environment = 0
-        if (in_runtime_environment && line ~ /^      (TZ|XYMEDIAVAULT_FUSE_HOST_PATH|XYMEDIAVAULT_XIAOYA_HOST_PATH|XYMEDIAVAULT_EMBY_HOST_PATH):/) {
+        if (in_runtime_environment && line ~ /^      (TZ|XYMEDIAVAULT_FUSE_HOST_PATH|XYMEDIAVAULT_XIAOYA_HOST_PATH|XYMEDIAVAULT_EMBY_HOST_PATH|XYMEDIAVAULT_TMM_HOST_PATH|XYMEDIAVAULT_TMM_LOCAL_PATH):/) {
           continue
         }
 
         print line
+        if (i == service_start && !volumes_line && !tmm_volume_present) {
+          print "    volumes:"
+          print "      - ./tmm:/app/tmm"
+        } else if (i == volumes_line && !tmm_volume_present) {
+          print "      - ./tmm:/app/tmm"
+        }
         if (environment_line && i == environment_line) {
           print_runtime_environment()
         } else if (!environment_line && ((container_line && i == container_line) || (!container_line && i == service_start))) {
@@ -700,6 +844,11 @@ if existing_install_present; then
   ' docker-compose.yml >"$temporary_compose"; then
     rm -f "$temporary_compose"
     echo "更新 docker-compose.yml 的宿主机路径失败。" >&2
+    exit 1
+  fi
+  if ! $COMPOSE --project-directory "$INSTALL_DIR" -f "$temporary_compose" config -q >/dev/null 2>&1; then
+    rm -f "$temporary_compose"
+    echo "更新后的 docker-compose.yml 校验失败，已保留原配置。" >&2
     exit 1
   fi
   mv "$temporary_compose" docker-compose.yml
@@ -717,6 +866,11 @@ if existing_install_present; then
 
   echo "重建 XyMediaVault 容器..."
   run_compose up -d --no-deps --force-recreate xymediavault
+  restore_legacy_tmm_after_parent_replacement
+  if [ "$TMM_UPDATE_RESTORED" = "true" ]; then
+    echo "迁移旧版 TMM 到独立容器网络..."
+    docker restart xymediavault >/dev/null
+  fi
 
   echo
   print_access_info
@@ -763,7 +917,7 @@ if [ "$CONTINUE_INSTALL" != "true" ]; then
   exit 0
 fi
 
-mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$EMBY_HOST_PATH/config"
+mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$EMBY_HOST_PATH/config" "$INSTALL_DIR/tmm/data"
 if ! cleanup_fuse_mounts_under "$FUSE_HOST_PATH"; then
   exit 1
 fi
@@ -839,6 +993,8 @@ services:
       XYMEDIAVAULT_FUSE_HOST_PATH: "${FUSE_HOST_PATH}"
       XYMEDIAVAULT_XIAOYA_HOST_PATH: "${INSTALL_DIR}/xiaoya"
       XYMEDIAVAULT_EMBY_HOST_PATH: "${EMBY_HOST_PATH}"
+      XYMEDIAVAULT_TMM_HOST_PATH: "${INSTALL_DIR}/tmm"
+      XYMEDIAVAULT_TMM_LOCAL_PATH: "/app/tmm"
     ports:
       - "${API_PORT}:8080"
       - "${WEBDAV_PORT}:8081"
@@ -848,6 +1004,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./xiaoya:/app/xiaoya
+      - ./tmm:/app/tmm
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
     stop_grace_period: 15s
