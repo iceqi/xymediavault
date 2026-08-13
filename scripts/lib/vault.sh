@@ -68,8 +68,14 @@ vault_install() {
 			[ -n "$d" ] || die2 '--dir 需要参数'
 			shift
 			;;
-		--non-interactive) noninteractive=true; shift ;;
-		--yes) assumeyes=true; shift ;;
+		--non-interactive)
+			noninteractive=true
+			shift
+			;;
+		--yes)
+			assumeyes=true
+			shift
+			;;
 		*) die2 "未知 vault install 参数：$1" ;;
 		esac
 	done
@@ -88,8 +94,16 @@ vault_check() {
 	d=$(install_dir)
 	while [ $# -gt 0 ]; do
 		case "$1" in
-		--dir) [ $# -ge 2 ] || die2 '--dir 需要参数'; d=$2; shift 2 ;;
-		--dir=*) d=${1#--dir=}; [ -n "$d" ] || die2 '--dir 需要参数'; shift ;;
+		--dir)
+			[ $# -ge 2 ] || die2 '--dir 需要参数'
+			d=$2
+			shift 2
+			;;
+		--dir=*)
+			d=${1#--dir=}
+			[ -n "$d" ] || die2 '--dir 需要参数'
+			shift
+			;;
 		*) die2 "未知 vault check 参数：$1" ;;
 		esac
 	done
@@ -118,7 +132,10 @@ vault_upgrade() {
 			[ -n "$ch" ] || die2 '--channel 需要参数'
 			shift
 			;;
-		--yes) yes=true; shift ;;
+		--yes)
+			yes=true
+			shift
+			;;
 		--dir)
 			[ $# -ge 2 ] || die2 '--dir 需要参数'
 			d=$2
@@ -200,7 +217,7 @@ vault_command() {
 	cmd=${1:-}
 	[ $# -gt 0 ] && shift
 	case "$cmd" in
-	install) vault_install "$@" ;; check) vault_check ;; upgrade) vault_upgrade "$@" ;; switch) vault_switch "$@" ;;
+	install) vault_install "$@" ;; check) vault_check "$@" ;; upgrade) vault_upgrade "$@" ;; switch) vault_switch "$@" ;;
 	*)
 		vault_usage
 		exit 2

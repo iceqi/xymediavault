@@ -6,11 +6,106 @@ SCRIPT_DIR=$(
 	cd -- "$(dirname -- "$0")" && pwd -P
 )
 LIB_DIR="$SCRIPT_DIR/lib"
-for lib in common.sh vault.sh title.sh; do
-	if [ ! -r "$LIB_DIR/$lib" ]; then
-		printf '%s\n' "缺少安装器组件：$LIB_DIR/$lib。请下载完整 bundle 后重试。" >&2
-		exit 1
+BOOTSTRAP_TMP=
+bootstrap_cleanup() {
+	[ -n "${BOOTSTRAP_TMP:-}" ] && rm -rf "$BOOTSTRAP_TMP"
+}
+bootstrap_error() {
+	printf '[xymedia] ERROR: %s\n' "$1" >&2
+	exit 1
+}
+bootstrap_bundle() {
+	ref=${XYMEDIA_INSTALLER_REF:-beta}
+	repo=${XYMEDIA_INSTALLER_REPO:-iceqi/xymediavault}
+	case "$ref" in
+	'' | -* | *..* | *[!A-Za-z0-9._/-]*) bootstrap_error '无效的 installer ref。' ;;
+	esac
+	case "$repo" in
+	[A-Za-z0-9._-]*/[A-Za-z0-9._-]*) ;;
+	*) bootstrap_error '无效的 installer repo。' ;;
+	esac
+	command -v curl >/dev/null 2>&1 || bootstrap_error 'bootstrap 需要 curl。'
+	command -v tar >/dev/null 2>&1 || bootstrap_error 'bootstrap 需要 tar。'
+	BOOTSTRAP_TMP=$(mktemp -d "${TMPDIR:-/tmp}/xymedia-installer.XXXXXX") || bootstrap_error '无法创建临时目录。'
+	trap 'bootstrap_cleanup' 0 HUP INT TERM
+	archive="$BOOTSTRAP_TMP/bundle.tar.gz"
+	if [ -n "${XYMEDIA_INSTALLER_ARCHIVE_URL:-}" ]; then
+		url=$XYMEDIA_INSTALLER_ARCHIVE_URL
+		if [ "${XYMEDIA_INSTALLER_TESTING:-0}" != 1 ]; then
+			case "$url" in https://*) ;; *) bootstrap_error '生产环境 archive URL 必须使用 HTTPS。' ;; esac
+		fi
+	else
+		base=https://codeload.github.com
+		if [ -n "${XYMEDIA_GITHUB_PROXY:-https://gh-proxy.org/}" ]; then
+			proxy=${XYMEDIA_GITHUB_PROXY%/}/
+			base=${proxy}https://codeload.github.com
+		fi
+		url="$base/$repo/tar.gz/refs/heads/$ref"
 	fi
+	if [ "${XYMEDIA_INSTALLER_TESTING:-0}" = 1 ]; then
+		curl -fL --retry 3 --connect-timeout 15 --max-time 300 "$url" -o "$archive" || bootstrap_error '无法下载 installer bundle。'
+	else
+		curl --proto '=https' --tlsv1.2 -fL --retry 3 --connect-timeout 15 --max-time 300 "$url" -o "$archive" || bootstrap_error '无法下载 installer bundle。'
+	fi
+	size=$(wc -c <"$archive")
+	case "$size" in '' | *[!0-9]*) bootstrap_error '无法检查 bundle 大小。' ;; esac
+	[ "$size" -ge 1024 ] && [ "$size" -le 5242880 ] || bootstrap_error 'bundle 大小不在允许范围内。'
+	prefix=
+	while IFS= read -r entry; do
+		case "$entry" in
+		/* | ../* | */../* | *'/..') bootstrap_error 'bundle 包含不安全路径。' ;;
+		esac
+		case "$entry" in
+		xymediavault-*)
+			entry_prefix=${entry%%/*}
+			[ -n "$prefix" ] || prefix=$entry_prefix
+			[ "$entry_prefix" = "$prefix" ] || bootstrap_error 'bundle 包含多个顶层目录。'
+			;;
+		'') ;;
+		*) bootstrap_error 'bundle 包含错误的顶层目录。' ;;
+		esac
+	done <<EOF
+$(tar -tzf "$archive")
+EOF
+	[ -n "$prefix" ] || bootstrap_error 'bundle 为空。'
+	case "$prefix" in xymediavault-*) ;; *) bootstrap_error 'bundle 顶层目录无效。' ;; esac
+	while IFS= read -r detail; do
+		case "$detail" in
+		l* | h* | *' -> '* | *' link to '*) bootstrap_error 'bundle 不允许符号链接或硬链接。' ;;
+		esac
+	done <<EOF
+$(tar -tvzf "$archive")
+EOF
+	repo_dir="$BOOTSTRAP_TMP/repo"
+	mkdir "$repo_dir"
+	tar -xzf "$archive" -C "$repo_dir" --strip-components=1 || bootstrap_error '无法提取 installer bundle。'
+	for required in scripts/install.sh scripts/legacy-install.sh scripts/lib/common.sh scripts/lib/vault.sh scripts/lib/title.sh; do
+		[ -f "$repo_dir/$required" ] && [ ! -L "$repo_dir/$required" ] || bootstrap_error "bundle 缺少或链接化文件：$required。"
+	done
+	chmod +x "$repo_dir/scripts/install.sh" "$repo_dir/scripts/legacy-install.sh"
+	export XYMEDIA_INSTALLER_BOOTSTRAPPED=1
+	child=$repo_dir/scripts/install.sh
+	if [ "$#" -eq 0 ]; then
+		if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+			sh "$child" </dev/tty >/dev/tty 2>/dev/tty
+			status=$?
+		else
+			printf '%s\n' '无参数菜单需要可读写的 /dev/tty；请 clone 完整仓库后执行，或使用带参数的非交互命令。' >&2
+			status=2
+		fi
+	else
+		sh "$child" "$@" </dev/null
+		status=$?
+	fi
+	bootstrap_cleanup
+	trap - 0 HUP INT TERM
+	exit "$status"
+}
+
+if [ ! -r "$LIB_DIR/common.sh" ] || [ ! -r "$LIB_DIR/vault.sh" ] || [ ! -r "$LIB_DIR/title.sh" ] || [ ! -r "$SCRIPT_DIR/legacy-install.sh" ]; then
+	bootstrap_bundle "$@"
+fi
+for lib in common.sh vault.sh title.sh; do
 	# shellcheck disable=SC1090
 	. "$LIB_DIR/$lib"
 done
@@ -37,7 +132,7 @@ EOF
 }
 
 menu() {
-	MENU_INTERACTIVE=true
+	export MENU_INTERACTIVE=true
 	while :; do
 		cat <<'EOF'
 
@@ -102,13 +197,15 @@ EOF
 }
 title_menu_install() {
 	printf '%s\n' 'Title 通道：1) stable  2) beta  0) 返回'
-	printf '请选择：'; IFS= read -r c || return 0
+	printf '请选择：'
+	IFS= read -r c || return 0
 	case "$c" in 1) title_install stable ;; 2) title_install beta ;; esac
 }
 title_menu_upgrade() {
 	title_check
 	printf '%s\n' '升级 Title：1) 当前通道  2) stable  3) beta  0) 返回'
-	printf '请选择：'; IFS= read -r c || return 0
+	printf '请选择：'
+	IFS= read -r c || return 0
 	case "$c" in 1) title_upgrade --yes ;; 2) title_upgrade --channel stable --yes ;; 3) title_upgrade --channel beta --yes ;; esac
 }
 pause_menu() {

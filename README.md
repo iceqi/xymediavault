@@ -35,7 +35,33 @@ XyMediaVault 是面向小雅 Alist、Emby、Jellyfin 和 TVBox 的媒体资源�
 
 ## 统一安装器
 
-先下载完整脚本 bundle，再在目标主机执行。入口必须和 `scripts/lib` 一起保存：
+Beta 支持从同一分支下载完整脚本 bundle 后进入统一菜单：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh
+```
+
+合并稳定版后，稳定入口使用 `main`：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+```
+
+无参数菜单需要可读写的 `/dev/tty`；SSH 通常可直接使用。无 TTY 时请 clone 完整 bundle，或执行带参数的非交互命令：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh -s -- vault install --channel beta --non-interactive --dir /opt/xymediavault
+```
+
+入口也支持通过 `XYMEDIA_INSTALLER_REF` 选择 ref（例如固定 commit），该变量要传给 `sh`：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | env XYMEDIA_INSTALLER_REF=beta sh
+```
+
+自举会从同一 ref 下载临时 bundle，校验归档路径、链接和大小后执行，退出时清理临时目录。生产下载地址使用 HTTPS；测试可通过环境变量覆盖 archive URL。
+
+也可以先下载完整脚本 bundle，再在目标主机执行。入口必须和 `scripts/lib` 一起保存：
 
 ```bash
 git clone --branch beta https://github.com/iceqi/xymediavault.git
@@ -43,7 +69,7 @@ cd xymediavault
 bash scripts/install.sh
 ```
 
-无参数且终端可交互时进入统一数字菜单；无 TTY 时显示帮助并返回 2，不支持 `curl | sh` 菜单安装。Beta 使用 `iceqi/xymediavault:beta`，不会覆盖 `latest`。
+无参数且终端可交互时进入统一数字菜单；无 TTY 且无 `/dev/tty` 时返回 2。Beta 使用 `iceqi/xymediavault:beta`，不会覆盖 `latest`。
 
 ```bash
 bash scripts/install.sh vault install --channel beta --dir /opt/xymediavault --non-interactive

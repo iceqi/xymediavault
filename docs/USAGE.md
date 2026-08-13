@@ -30,6 +30,26 @@ docker-compose version
 
 ## 2. 统一安装器
 
+Beta 一键入口（会下载同一 `beta` ref 的完整脚本 bundle）：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh
+```
+
+合并稳定版后，稳定入口使用 `main`：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
+```
+
+无参数菜单需要 `/dev/tty`。自动化环境请显式传递参数，例如：
+
+```bash
+curl -fsSL https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/beta/scripts/install.sh | sh -s -- vault install --channel beta --non-interactive --dir /opt/xymediavault
+```
+
+需要固定 ref 时使用 `curl ... | env XYMEDIA_INSTALLER_REF=<ref> sh`。自举仅在入口缺少完整脚本 bundle 时触发，下载到临时目录，校验后执行并清理；clone 本地执行不会额外下载。
+
 下载仓库或 release bundle 后执行：
 
 ```bash
@@ -38,9 +58,9 @@ cd xymediavault
 bash scripts/install.sh
 ```
 
-必须下载完整 bundle；不要只下载 `install.sh`，因为入口依赖 `scripts/lib`。
+本地执行必须下载完整 bundle；不要只下载 `install.sh`，因为入口依赖 `scripts/lib`。
 
-无参数脚本只有在 stdin/stdout 都是 TTY 时进入菜单；pipe 环境显示帮助并返回 2。完整 bundle 必须包含 `scripts/lib`，不要只下载入口文件。
+无参数脚本在 pipe 环境会使用 `/dev/tty` 进入菜单；没有可读写 TTY 时返回 2。完整 bundle 必须包含 `scripts/lib`，不要只下载入口文件。
 
 标准子命令：
 

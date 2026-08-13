@@ -24,7 +24,7 @@ PATH="$TMP/bin:$PATH"
 cat >"$TMP/fake-legacy.sh" <<'EOF'
 #!/usr/bin/env sh
 set -eu
-printf '%s|%s|%s\n' "$IMAGE" "$XYMEDIA_TMM_IMAGE" "${1:-}" >"$FAKE_LEGACY_LOG"
+printf '%s|%s|%s|%s\n' "$IMAGE" "$XYMEDIA_TMM_IMAGE" "${1:-}" "${XYMEDIA_NON_INTERACTIVE:-}" >"$FAKE_LEGACY_LOG"
 mkdir -p "$1/data"
 printf 'services:\n  xymediavault:\n    image: %s\n    environment:\n      XYMEDIA_TMM_IMAGE: "%s"\n    ports:\n      - "19080:8080"\n      - "19081:8081"\n      - "19082:8082"\n    volumes:\n      - ./data:/app/data\n      - ./tmm:/app/tmm\n      - ./mnt:/mnt/xymediavault\n  xiaoya-alist:\n    image: xiaoyaliu/alist:latest\n    ports:\n      - "15678:80"\n      - "12345:2345"\n      - "12346:2346"\n    volumes:\n      - ./xiaoya:/data\n' "$IMAGE" "$XYMEDIA_TMM_IMAGE" >"$1/docker-compose.yml"
 printf 'services:\n  xymediavault:\n    devices:\n      - /dev/fuse:/dev/fuse\n    cap_add:\n      - SYS_ADMIN\n    security_opt:\n      - apparmor:unconfined\n' >"$1/docker-compose.fuse.yml"
@@ -60,14 +60,11 @@ test "$(cut -d'|' -f2 "$TMP/legacy.log")" = iceqi/xymedia-tmm:beta
 grep -q 'xiaoya-alist' "$TMP/vault/docker-compose.yml"
 test "$(cat "$TMP/vault/.xymedia-channel")" = beta
 mkdir "$TMP/menu"
-(cd "$TMP/menu" && script -qec "env FAKE_LEGACY_LOG='$TMP/menu.log' XYMEDIA_LEGACY_INSTALLER='$TMP/fake-legacy.sh' $INSTALL menu" /dev/null <<EOF
-1
-
-0
-EOF
-)
+(cd "$TMP/menu" && timeout 20 script -qec "printf '1\\n\\n0\\n' | env FAKE_LEGACY_LOG='$TMP/menu.log' XYMEDIA_LEGACY_INSTALLER='$TMP/fake-legacy.sh' $INSTALL menu" /dev/null)
 test -s "$TMP/menu.log"
-grep -Fq 'iceqi/xymediavault:latest|iceqi/xymedia-tmm:latest|false' "$TMP/menu.log"
+test "$(cut -d'|' -f1 "$TMP/menu.log")" = iceqi/xymediavault:latest
+test "$(cut -d'|' -f2 "$TMP/menu.log")" = iceqi/xymedia-tmm:latest
+test "$(cut -d'|' -f4 "$TMP/menu.log")" = false
 lock="$TMP/lock"
 mkdir "$lock"
 printf '%s\n' "$$" >"$lock/pid"
@@ -81,5 +78,18 @@ XYMEDIA_INSTALL_DIR="$TMP/vault" "$INSTALL" status --json | python3 -c 'import j
 set +e
 "$INSTALL" vault install --channel stable --dir "$TMP/vault" --non-interactive >/dev/null 2>&1
 test $? -ne 0
+set -e
+BOOTSTRAP_INPUT="$TMP/bootstrap-input.sh"
+BOOTSTRAP_ARCHIVE="$TMP/bootstrap.tar.gz"
+cp "$INSTALL" "$BOOTSTRAP_INPUT"
+tar -czf "$BOOTSTRAP_ARCHIVE" -C "$ROOT" --transform='s,^,xymediavault-beta/,' scripts/install.sh scripts/legacy-install.sh scripts/lib
+test "$(XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" help | grep -c 'vault install')" -eq 1
+set +e
+printf '' | XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" >/dev/null 2>&1
+test $? -eq 2
+set -e
+set +e
+XYMEDIA_INSTALLER_REF='../unsafe' XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" help >/dev/null 2>&1
+test $? -eq 1
 set -e
 printf '%s\n' 'installer tests: PASS'
