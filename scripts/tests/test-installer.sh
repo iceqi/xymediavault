@@ -84,6 +84,28 @@ BOOTSTRAP_ARCHIVE="$TMP/bootstrap.tar.gz"
 cp "$INSTALL" "$BOOTSTRAP_INPUT"
 tar -czf "$BOOTSTRAP_ARCHIVE" -C "$ROOT" --transform='s,^,xymediavault-beta/,' scripts/install.sh scripts/legacy-install.sh scripts/lib
 test "$(XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" help | grep -c 'vault install')" -eq 1
+mkdir "$TMP/bootstrap-bin"
+cat >"$TMP/bootstrap-bin/curl" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+destination=
+url=
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	-o)
+		destination=$2
+		shift 2
+		;;
+	https://*) url=$1; shift ;;
+	*) shift ;;
+	esac
+done
+printf '%s\n' "$url" >"$BOOTSTRAP_URL_LOG"
+cp "$BOOTSTRAP_ARCHIVE_SOURCE" "$destination"
+EOF
+chmod +x "$TMP/bootstrap-bin/curl"
+test "$(PATH="$TMP/bootstrap-bin:$PATH" BOOTSTRAP_URL_LOG="$TMP/bootstrap-url.log" BOOTSTRAP_ARCHIVE_SOURCE="$BOOTSTRAP_ARCHIVE" XYMEDIA_INSTALLER_TESTING=1 sh "$BOOTSTRAP_INPUT" help | grep -c 'vault install')" -eq 1
+test "$(cat "$TMP/bootstrap-url.log")" = 'https://gh-proxy.org/https://codeload.github.com/iceqi/xymediavault/tar.gz/refs/heads/beta'
 set +e
 printf '' | XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" >/dev/null 2>&1
 test $? -eq 2

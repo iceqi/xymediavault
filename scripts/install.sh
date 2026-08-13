@@ -36,8 +36,9 @@ bootstrap_bundle() {
 		fi
 	else
 		base=https://codeload.github.com
-		if [ -n "${XYMEDIA_GITHUB_PROXY:-https://gh-proxy.org/}" ]; then
-			proxy=${XYMEDIA_GITHUB_PROXY%/}/
+		proxy=${XYMEDIA_GITHUB_PROXY:-https://gh-proxy.org/}
+		if [ -n "$proxy" ]; then
+			proxy=${proxy%/}/
 			base=${proxy}https://codeload.github.com
 		fi
 		url="$base/$repo/tar.gz/refs/heads/$ref"
