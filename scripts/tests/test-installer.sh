@@ -25,8 +25,8 @@ cat >"$TMP/fake-legacy.sh" <<'EOF'
 #!/usr/bin/env sh
 set -eu
 printf '%s|%s|%s|%s\n' "$IMAGE" "$XYMEDIA_TMM_IMAGE" "${1:-}" "${XYMEDIA_NON_INTERACTIVE:-}" >"$FAKE_LEGACY_LOG"
-mkdir -p "$1/data"
-printf 'services:\n  xymediavault:\n    image: %s\n    environment:\n      XYMEDIA_TMM_IMAGE: "%s"\n    ports:\n      - "19080:8080"\n      - "19081:8081"\n      - "19082:8082"\n    volumes:\n      - ./data:/app/data\n      - ./tmm:/app/tmm\n      - ./mnt:/mnt/xymediavault\n  xiaoya-alist:\n    image: xiaoyaliu/alist:latest\n    ports:\n      - "15678:80"\n      - "12345:2345"\n      - "12346:2346"\n    volumes:\n      - ./xiaoya:/data\n' "$IMAGE" "$XYMEDIA_TMM_IMAGE" >"$1/docker-compose.yml"
+mkdir -p "$1/data" "$1/components"
+printf 'services:\n  xymediavault:\n    image: %s\n    environment:\n      XYMEDIA_COMPONENT_RUNTIME: "local"\n    ports:\n      - "19080:8080"\n      - "19081:8081"\n      - "19082:8082"\n    volumes:\n      - ./data:/app/data\n      - ./tmm:/app/tmm\n      - ./components:/app/components\n      - ./mnt:/mnt/xymediavault\n  xiaoya-alist:\n    image: xiaoyaliu/alist:latest\n    ports:\n      - "15678:80"\n      - "12345:2345"\n      - "12346:2346"\n    volumes:\n      - ./xiaoya:/data\n' "$IMAGE" >"$1/docker-compose.yml"
 printf 'services:\n  xymediavault:\n    devices:\n      - /dev/fuse:/dev/fuse\n    cap_add:\n      - SYS_ADMIN\n    security_opt:\n      - apparmor:unconfined\n' >"$1/docker-compose.fuse.yml"
 EOF
 chmod +x "$TMP/fake-legacy.sh"
@@ -58,6 +58,8 @@ FAKE_LEGACY_LOG="$TMP/legacy.log" XYMEDIA_LEGACY_INSTALLER="$TMP/fake-legacy.sh"
 test "$(cut -d'|' -f1 "$TMP/legacy.log")" = iceqi/xymediavault:beta
 test "$(cut -d'|' -f2 "$TMP/legacy.log")" = iceqi/xymedia-tmm:beta
 grep -q 'xiaoya-alist' "$TMP/vault/docker-compose.yml"
+grep -q './components:/app/components' "$TMP/vault/docker-compose.yml"
+test -d "$TMP/vault/components"
 test "$(cat "$TMP/vault/.xymedia-channel")" = beta
 mkdir "$TMP/menu"
 (cd "$TMP/menu" && timeout 20 script -qec "printf '1\\n\\n0\\n' | env FAKE_LEGACY_LOG='$TMP/menu.log' XYMEDIA_LEGACY_INSTALLER='$TMP/fake-legacy.sh' $INSTALL menu" /dev/null)

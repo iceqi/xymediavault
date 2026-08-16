@@ -710,7 +710,7 @@ if existing_install_present; then
 
 	mkdir -p "$INSTALL_DIR"
 	cd "$INSTALL_DIR"
-	mkdir -p "$INSTALL_DIR/tmm/data"
+	mkdir -p "$INSTALL_DIR/tmm/data" "$INSTALL_DIR/components"
 
 	# 更新预检使用独立空目录，避免在停止容器前访问仍处于挂载状态的媒体目录。
 	fuse_probe_host_path="$(mktemp -d "$INSTALL_DIR/.xymediavault-fuse-probe.XXXXXX")"
@@ -788,7 +788,7 @@ if existing_install_present; then
       print "      XYMEDIAVAULT_EMBY_HOST_PATH: " yaml_quote(emby_host_path)
       print "      XYMEDIAVAULT_TMM_HOST_PATH: " yaml_quote(tmm_host_path)
       print "      XYMEDIAVAULT_TMM_LOCAL_PATH: \"/app/tmm\""
-      print "      XYMEDIA_TMM_IMAGE: \"" tmm_image "\""
+      print "      XYMEDIA_COMPONENT_RUNTIME: \"local\""
     }
     {
       lines[NR] = $0
@@ -800,6 +800,7 @@ if existing_install_present; then
       container_line = 0
       volumes_line = 0
       tmm_volume_present = 0
+      components_volume_present = 0
 
       for (i = 1; i <= NR; i++) {
         if (lines[i] ~ /^  xymediavault:[[:space:]]*$/) {
@@ -827,6 +828,8 @@ if existing_install_present; then
         gsub(/["\047]/, "", mount_line)
         if (mount_line ~ /:\/app\/tmm([:]|[[:space:]]|$)/) tmm_volume_present = 1
         if (in_volumes && mount_line ~ /^[[:space:]]*target:[[:space:]]*\/app\/tmm[[:space:]]*$/) tmm_volume_present = 1
+        if (mount_line ~ /:\/app\/components([:]|[[:space:]]|$)/) components_volume_present = 1
+        if (in_volumes && mount_line ~ /^[[:space:]]*target:[[:space:]]*\/app\/components[[:space:]]*$/) components_volume_present = 1
       }
 
       for (i = 1; i <= NR; i++) {
@@ -838,16 +841,18 @@ if existing_install_present; then
 
         in_runtime_environment = environment_line && i > environment_line && i < service_end
         if (in_runtime_environment && line ~ /^    [^[:space:]]/) in_runtime_environment = 0
-        if (in_runtime_environment && line ~ /^      (TZ|XYMEDIAVAULT_FUSE_HOST_PATH|XYMEDIAVAULT_XIAOYA_HOST_PATH|XYMEDIAVAULT_EMBY_HOST_PATH|XYMEDIAVAULT_TMM_HOST_PATH|XYMEDIAVAULT_TMM_LOCAL_PATH|XYMEDIA_TMM_IMAGE):/) {
+        if (in_runtime_environment && line ~ /^      (TZ|XYMEDIAVAULT_FUSE_HOST_PATH|XYMEDIAVAULT_XIAOYA_HOST_PATH|XYMEDIAVAULT_EMBY_HOST_PATH|XYMEDIAVAULT_TMM_HOST_PATH|XYMEDIAVAULT_TMM_LOCAL_PATH|XYMEDIA_TMM_IMAGE|XYMEDIA_COMPONENT_RUNTIME):/) {
           continue
         }
 
         print line
-        if (i == service_start && !volumes_line && !tmm_volume_present) {
+        if (i == service_start && !volumes_line) {
           print "    volumes:"
-          print "      - ./tmm:/app/tmm"
-        } else if (i == volumes_line && !tmm_volume_present) {
-          print "      - ./tmm:/app/tmm"
+          if (!tmm_volume_present) print "      - ./tmm:/app/tmm"
+          if (!components_volume_present) print "      - ./components:/app/components"
+        } else if (i == volumes_line) {
+          if (!tmm_volume_present) print "      - ./tmm:/app/tmm"
+          if (!components_volume_present) print "      - ./components:/app/components"
         }
         if (environment_line && i == environment_line) {
           print_runtime_environment()
@@ -933,7 +938,7 @@ if [ "$CONTINUE_INSTALL" != "true" ]; then
 	exit 0
 fi
 
-mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$EMBY_HOST_PATH/config" "$INSTALL_DIR/tmm/data"
+mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/xiaoya/data" "$EMBY_HOST_PATH/config" "$INSTALL_DIR/tmm/data" "$INSTALL_DIR/components"
 if ! cleanup_fuse_mounts_under "$FUSE_HOST_PATH"; then
 	exit 1
 fi
@@ -1011,7 +1016,7 @@ services:
       XYMEDIAVAULT_EMBY_HOST_PATH: "${EMBY_HOST_PATH}"
       XYMEDIAVAULT_TMM_HOST_PATH: "${INSTALL_DIR}/tmm"
       XYMEDIAVAULT_TMM_LOCAL_PATH: "/app/tmm"
-      XYMEDIA_TMM_IMAGE: "${XYMEDIA_TMM_IMAGE:-iceqi/xymedia-tmm:beta}"
+      XYMEDIA_COMPONENT_RUNTIME: "local"
     ports:
       - "${API_PORT}:8080"
       - "${WEBDAV_PORT}:8081"
@@ -1022,6 +1027,7 @@ services:
       - ./data:/app/data
       - ./xiaoya:/app/xiaoya
       - ./tmm:/app/tmm
+      - ./components:/app/components
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
     stop_grace_period: 15s
