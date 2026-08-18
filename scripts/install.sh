@@ -15,7 +15,7 @@ bootstrap_error() {
 	exit 1
 }
 bootstrap_bundle() {
-	ref=${XYMEDIA_INSTALLER_REF:-beta}
+	ref=${XYMEDIA_INSTALLER_REF:-main}
 	repo=${XYMEDIA_INSTALLER_REPO:-iceqi/xymediavault}
 	case "$ref" in
 	'' | -* | *..* | *[!A-Za-z0-9._/-]*) bootstrap_error '无效的 installer ref。' ;;

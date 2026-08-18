@@ -31,6 +31,12 @@ printf 'services:\n  xymediavault:\n    devices:\n      - /dev/fuse:/dev/fuse\n 
 EOF
 chmod +x "$TMP/fake-legacy.sh"
 test "$($INSTALL help | grep -c 'vault install')" -eq 1
+grep -q 'driver: postgres' "$ROOT/scripts/legacy-install.sh"
+grep -q 'password_file: /app/data/postgres-secrets/app-password' "$ROOT/scripts/legacy-install.sh"
+grep -q 'reject_legacy_sqlite' "$ROOT/scripts/legacy-install.sh"
+! grep -q 'driver: sqlite' "$ROOT/scripts/legacy-install.sh"
+! grep -q 'linux/arm/v7' "$ROOT/scripts/lib/common.sh"
+grep -q 'ref=${XYMEDIA_INSTALLER_REF:-main}' "$ROOT/scripts/install.sh"
 set +e
 printf '' | "$INSTALL" >/dev/null 2>&1
 test $? -eq 2
@@ -178,7 +184,7 @@ cp "$BOOTSTRAP_ARCHIVE_SOURCE" "$destination"
 EOF
 chmod +x "$TMP/bootstrap-bin/curl"
 test "$(PATH="$TMP/bootstrap-bin:$PATH" BOOTSTRAP_URL_LOG="$TMP/bootstrap-url.log" BOOTSTRAP_ARCHIVE_SOURCE="$BOOTSTRAP_ARCHIVE" XYMEDIA_INSTALLER_TESTING=1 sh "$BOOTSTRAP_INPUT" help | grep -c 'vault install')" -eq 1
-test "$(cat "$TMP/bootstrap-url.log")" = 'https://gh-proxy.org/https://codeload.github.com/iceqi/xymediavault/tar.gz/refs/heads/beta'
+test "$(cat "$TMP/bootstrap-url.log")" = 'https://gh-proxy.org/https://codeload.github.com/iceqi/xymediavault/tar.gz/refs/heads/main'
 set +e
 printf '' | XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" >/dev/null 2>&1
 test $? -eq 2

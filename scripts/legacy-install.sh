@@ -212,8 +212,22 @@ xymediavault_container_exists() {
 existing_install_present() {
 	[ -f "$INSTALL_DIR/docker-compose.yml" ] ||
 		[ -f "$INSTALL_DIR/config.yaml" ] ||
-		[ -f "$INSTALL_DIR/data/xymediavault.db" ] ||
+		[ -d "$INSTALL_DIR/data/postgres" ] ||
 		xymediavault_container_exists
+}
+
+reject_legacy_sqlite() {
+	for legacy_path in "$INSTALL_DIR"/*.db "$INSTALL_DIR"/*.db-wal "$INSTALL_DIR"/*.db-shm "$INSTALL_DIR"/data/*.db "$INSTALL_DIR"/data/*.db-wal "$INSTALL_DIR"/data/*.db-shm; do
+		[ -e "$legacy_path" ] || continue
+		echo "检测到旧 SQLite 数据文件：$legacy_path" >&2
+		echo "当前版本只支持 bundled PostgreSQL 17；旧数据不会迁移或删除，请保留原目录并使用新的空安装目录。" >&2
+		exit 1
+	done
+	if [ -f "$INSTALL_DIR/config.yaml" ] && grep -Eq '^[[:space:]]*driver:[[:space:]]*sqlite[[:space:]]*$' "$INSTALL_DIR/config.yaml"; then
+		echo "检测到旧 SQLite 配置：$INSTALL_DIR/config.yaml" >&2
+		echo "当前版本不支持从 SQLite 原地升级，请保留原目录并使用新的空安装目录。" >&2
+		exit 1
+	fi
 }
 # END INSTALL DETECTION HELPERS
 
@@ -301,12 +315,8 @@ arm64 | aarch64 | linux/arm64)
 	HOST_ARCH="arm64"
 	TARGET_PLATFORM="linux/arm64"
 	;;
-arm | armv7 | armv7l | armhf | linux/arm/v7)
-	HOST_ARCH="arm"
-	TARGET_PLATFORM="linux/arm/v7"
-	;;
 *)
-	echo "当前架构暂不支持：$RAW_HOST_ARCH；支持的平台为 linux/amd64、linux/arm64、linux/arm/v7。" >&2
+	echo "当前架构暂不支持：$RAW_HOST_ARCH；支持的平台为 linux/amd64、linux/arm64。" >&2
 	exit 1
 	;;
 esac
@@ -584,6 +594,7 @@ fi
 PUBLIC_HOST="${PUBLIC_HOST:-$DETECTED_HOST}"
 
 REPAIR_EXISTING_INSTALL="false"
+reject_legacy_sqlite
 if existing_install_present; then
 	echo "检测到已有 XyMediaVault 安装：$INSTALL_DIR"
 	CONTINUE_UPDATE="$(prompt_bool "更新需要停止 XyMediaVault 容器并临时卸载媒体库，更新完成后会按原配置恢复。是否继续" "true")"
@@ -780,7 +791,7 @@ fi
 echo "每一项都提供默认值，不输入内容直接按回车即可使用默认值。"
 echo
 
-IMAGE="$(prompt_value "Docker 镜像（Beta，勿用于稳定环境）" "${IMAGE:-iceqi/xymediavault:beta}")"
+IMAGE="$(prompt_value "Docker 镜像" "${IMAGE:-iceqi/xymediavault:latest}")"
 PUBLIC_HOST="$(prompt_value "服务器访问 IP 或域名" "${PUBLIC_HOST:-$DETECTED_HOST}")"
 API_PORT="$(prompt_value "管理后台端口" "${API_PORT:-18080}")"
 WEBDAV_PORT="$(prompt_value "WebDAV 端口" "${WEBDAV_PORT:-18081}")"
@@ -837,8 +848,13 @@ server:
   web_dir: /app/web/dist
 
 database:
-  driver: sqlite
-  dsn: /app/data/xymediavault.db
+  driver: postgres
+  host: /var/run/postgresql
+  port: 5432
+  name: xymedia
+  user: xymedia_app
+  password_file: /app/data/postgres-secrets/app-password
+  sslmode: disable
 
 virtual:
   enable_remote_file_mapping: false
@@ -949,6 +965,26 @@ else
 fi
 
 run_compose up -d
+
+echo "等待 XyMediaVault 和 PostgreSQL 完成初始化..."
+health_ready="false"
+health_attempt=1
+while [ "$health_attempt" -le 90 ]; do
+	if curl -fsS "http://127.0.0.1:${API_PORT}/api/health" >/dev/null 2>&1; then
+		health_ready="true"
+		break
+	fi
+	sleep 2
+	health_attempt=$((health_attempt + 1))
+done
+if [ "$health_ready" != "true" ]; then
+	echo "XyMediaVault 未在限定时间内就绪。当前容器状态：" >&2
+	run_compose ps >&2 || true
+	echo "请检查日志：$COMPOSE -f $INSTALL_DIR/docker-compose.yml logs --tail=200 xymediavault" >&2
+	run_compose logs --tail=200 xymediavault >&2 || true
+	exit 1
+fi
+echo "XyMediaVault 与 PostgreSQL 已就绪。"
 
 restart_emby_if_media_unavailable
 

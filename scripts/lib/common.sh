@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-XYMEDIA_INSTALLER_VERSION=${XYMEDIA_INSTALLER_VERSION:-beta}
+XYMEDIA_INSTALLER_VERSION=${XYMEDIA_INSTALLER_VERSION:-pg17}
 VAULT_IMAGE_BASE=iceqi/xymediavault
 is_tty() { [ -t 0 ] && [ -t 1 ]; }
 log() { printf '[xymedia] %s\n' "$*"; }
@@ -18,7 +18,7 @@ compose_cmd() { if docker compose version >/dev/null 2>&1; then printf 'docker c
 platform() {
 	raw=$(docker version --format '{{.Server.Arch}}' 2>/dev/null || true)
 	[ -n "$raw" ] || raw=$(uname -m)
-	case "$raw" in amd64 | x86_64) printf linux/amd64 ;; arm64 | aarch64) printf linux/arm64 ;; arm | armv7 | armv7l | armhf) printf linux/arm/v7 ;; *) printf '%s' unknown ;; esac
+	case "$raw" in amd64 | x86_64) printf linux/amd64 ;; arm64 | aarch64) printf linux/arm64 ;; *) printf '%s' unknown ;; esac
 }
 lock_acquire() {
 	lock=${XYMEDIA_LOCK_DIR:-${TMPDIR:-/tmp}/xymedia-installer.lock}
