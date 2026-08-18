@@ -80,7 +80,7 @@ EOF
 	repo_dir="$BOOTSTRAP_TMP/repo"
 	mkdir "$repo_dir"
 	tar -xzf "$archive" -C "$repo_dir" --strip-components=1 || bootstrap_error '无法提取 installer bundle。'
-	for required in scripts/install.sh scripts/legacy-install.sh scripts/lib/common.sh scripts/lib/vault.sh scripts/lib/title.sh; do
+	for required in scripts/install.sh scripts/legacy-install.sh scripts/lib/common.sh scripts/lib/vault.sh; do
 		[ -f "$repo_dir/$required" ] && [ ! -L "$repo_dir/$required" ] || bootstrap_error "bundle 缺少或链接化文件：$required。"
 	done
 	chmod +x "$repo_dir/scripts/install.sh" "$repo_dir/scripts/legacy-install.sh"
@@ -103,10 +103,10 @@ EOF
 	exit "$status"
 }
 
-if [ ! -r "$LIB_DIR/common.sh" ] || [ ! -r "$LIB_DIR/vault.sh" ] || [ ! -r "$LIB_DIR/title.sh" ] || [ ! -r "$SCRIPT_DIR/legacy-install.sh" ]; then
+if [ ! -r "$LIB_DIR/common.sh" ] || [ ! -r "$LIB_DIR/vault.sh" ] || [ ! -r "$SCRIPT_DIR/legacy-install.sh" ]; then
 	bootstrap_bundle "$@"
 fi
-for lib in common.sh vault.sh title.sh; do
+for lib in common.sh vault.sh; do
 	# shellcheck disable=SC1090
 	. "$LIB_DIR/$lib"
 done
@@ -121,11 +121,8 @@ Usage:
   bash install.sh vault check
   bash install.sh vault upgrade [--channel stable|beta] [--yes]
   bash install.sh vault switch --channel stable|beta [--yes]
-  bash install.sh title install --channel stable|beta [--yes]
-  bash install.sh title check
-  bash install.sh title upgrade [--channel stable|beta] [--yes]
   bash install.sh env | version | status [--json]
-  bash install.sh uninstall vault|title [--purge-data] [--yes]
+  bash install.sh uninstall vault [--purge-data] [--yes]
   bash install.sh help
 
 Run without arguments only from a TTY to open the numeric menu.
@@ -142,12 +139,10 @@ XyMediaVault 管理菜单
 2) 安装 XyMediaVault Beta
 3) 检查/升级 XyMediaVault
 4) 切换 XyMediaVault 版本通道
-5) 安装 XyMedia Title
-6) 检查/升级 XyMedia Title
-7) 环境检测
-8) 当前版本
-9) 服务状态
-10) 卸载/维护
+5) 环境检测
+6) 当前版本
+7) 服务状态
+8) 卸载/维护
 0) 退出
 EOF
 		printf '请选择：'
@@ -172,52 +167,31 @@ EOF
 			pause_menu
 			;;
 		5)
-			title_menu_install
-			pause_menu
-			;;
-		6)
-			title_menu_upgrade
-			pause_menu
-			;;
-		7)
 			env_report
 			pause_menu
 			;;
-		8)
+		6)
 			version_report
 			pause_menu
 			;;
-		9)
+		7)
 			status_report
 			pause_menu
 			;;
-		10) maintenance_menu ;;
+		8) maintenance_menu ;;
 		0) return 0 ;; *) printf '%s\n' '无效选择，请输入菜单数字。' ;;
 		esac
 	done
-}
-title_menu_install() {
-	printf '%s\n' 'Title 通道：1) stable  2) beta  0) 返回'
-	printf '请选择：'
-	IFS= read -r c || return 0
-	case "$c" in 1) title_install stable ;; 2) title_install beta ;; esac
-}
-title_menu_upgrade() {
-	title_check
-	printf '%s\n' '升级 Title：1) 当前通道  2) stable  3) beta  0) 返回'
-	printf '请选择：'
-	IFS= read -r c || return 0
-	case "$c" in 1) title_upgrade --yes ;; 2) title_upgrade --channel stable --yes ;; 3) title_upgrade --channel beta --yes ;; esac
 }
 pause_menu() {
 	printf '按回车继续...'
 	IFS= read -r _ || true
 }
 maintenance_menu() {
-	printf '%s\n' '维护：1) 卸载 Vault  2) 卸载 Title 0) 返回'
+	printf '%s\n' '维护：1) 卸载 Vault 0) 返回'
 	printf '请选择：'
 	IFS= read -r c || return 0
-	case "$c" in 1) uninstall_service vault ;; 2) uninstall_service title ;; esac
+	case "$c" in 1) uninstall_service vault ;; esac
 }
 
 legacy_dispatch() {
@@ -242,10 +216,6 @@ status)
 vault)
 	shift
 	vault_command "$@"
-	;;
-title)
-	shift
-	title_command "$@"
 	;;
 uninstall)
 	shift

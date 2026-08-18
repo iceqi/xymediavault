@@ -88,7 +88,7 @@ bash scripts/install.sh status --json
 | `XIAOYA_PROXY_PORT` | 小雅代理端口 | `2346` |
 | `FORCE_PULL` | 是否忽略本地镜像并强制拉取 | `false` |
 
-菜单数字固定为 1-10 和 0 退出。stable 使用 Vault `latest`、TMM `latest`、Title `stable`；beta 使用三个对应的 `beta` 标签。`.xymedia-channel` 保存安装通道，升级通过 pull 和容器状态检查判断结果，网络/registry 不可用时不声称“最新”。
+菜单数字覆盖 Vault 安装、检查升级、通道切换、环境、版本、状态和维护，0 退出。stable 使用 Vault `latest`，beta 使用 Vault `beta`。`.xymedia-channel` 保存安装通道，升级通过 pull 和容器状态检查判断结果，网络/registry 不可用时不声称“最新”。
 
 环境变量只修改交互提示中的建议值，脚本仍会要求用户确认。例如：
 
@@ -165,17 +165,16 @@ FUSE 依赖：
 
 安装脚本会自动验证 `/dev/fuse`、Docker 运行模式、`SYS_ADMIN`、AppArmor 和 `rshared` bind。检测通过时才生成安装器管理的 FUSE Compose 配置；检测不可用时不会授予相关高权限，管理后台、WebDAV 和 TVBox 仍可使用。实际挂载和卸载继续由管理后台控制。
 
-## 7. 更新与 Title
+## 7. 更新与组件覆盖
 
 使用统一子命令：
 
 ```bash
 bash scripts/install.sh vault check
 bash scripts/install.sh vault upgrade --channel stable --yes
-bash scripts/install.sh title check
 ```
 
-Vault 更新保留数据、配置、FUSE 目录和 TMM；切换通道会备份数据库并在健康检查失败时恢复旧 Compose。独立 Title 不抢占 Vault 的 `xymedia-title`，只使用 `xymedia-title-standalone`。Vault-owned Title 必须从 Vault 管理接口升级，独立脚本拒绝删除它。
+Vault 更新保留数据、配置和 FUSE 目录；切换通道会备份数据库并在健康检查失败时恢复旧 Compose。TMM 与 Title 由 component runtime 在 XyMedia 单容器内启动。宿主机可将经过校验的 `components/tmm.tar.zst` 或 `components/title.tar.zst` 覆盖包放入组件目录，启动时优先使用覆盖包，失败则回退内置版本。
 
 ## 8. 日常维护
 

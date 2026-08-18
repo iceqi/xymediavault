@@ -29,12 +29,11 @@ vault_run_legacy() {
 	noninteractive=${4:-false}
 	assumeyes=${5:-false}
 	image=$(channel_image "$ch" vault)
-	tmm=$(channel_image "$ch" tmm)
 	legacy=${XYMEDIA_LEGACY_INSTALLER:-$SCRIPT_DIR/legacy-install.sh}
 	[ -r "$legacy" ] || die "缺少 legacy engine：$legacy"
 	mkdir -p "$d"
 	log "调用完整 Vault legacy engine（$mode，$ch）"
-	(cd "$d" && IMAGE="$image" XYMEDIA_TMM_IMAGE="$tmm" XYMEDIA_NON_INTERACTIVE="$noninteractive" XYMEDIA_ASSUME_YES="$assumeyes" sh "$legacy" "$d")
+	(cd "$d" && IMAGE="$image" XYMEDIA_NON_INTERACTIVE="$noninteractive" XYMEDIA_ASSUME_YES="$assumeyes" sh "$legacy" "$d")
 }
 
 vault_install() {

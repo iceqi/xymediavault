@@ -100,9 +100,9 @@ bash scripts/install.sh uninstall title --yes
 
 ### 安装选项
 
-菜单项 1-10 固定，分别覆盖 Vault stable、Vault beta、检查升级、切换通道、Title 安装、Title 检查升级、环境、版本、状态和卸载维护。菜单只是调用上述子命令。
+菜单项固定覆盖 Vault stable、Vault beta、检查升级、切换通道、环境、版本、状态和卸载维护。菜单只是调用上述子命令。
 
-Vault stable 和 beta 不能在同一台主机以固定容器名并存；通道记录在安装目录 `.xymedia-channel`。升级会先拉取目标镜像、备份 SQLite、重建并健康检查，失败时恢复 Compose 和旧容器。Title 独立服务使用 `xymedia-title-standalone`、`127.0.0.1:18083`、非 root、只读根文件系统、tmpfs 和丢弃 capability；发现 Vault-owned 或 foreign 的 `xymedia-title` 时拒绝操作。
+Vault stable 和 beta 不能在同一台主机以固定容器名并存；通道记录在安装目录 `.xymedia-channel`。升级会先拉取目标镜像、备份 SQLite、重建并健康检查，失败时恢复 Compose 和旧容器。TMM 与 Title 作为 XyMedia 单容器内的组件运行，`components` 目录中的 tar.zst 覆盖包可在宿主机替换。
 
 旧版 `bash install.sh /path` 仍会映射到 stable 安装并输出弃用警告；旧的完整交互逻辑保存在 `scripts/legacy-install.sh`，用于兼容既有迁移/FUSE 场景。
 
@@ -115,7 +115,7 @@ Vault stable 和 beta 不能在同一台主机以固定容器名并存；通道�
 - 小雅 Alist、管理和代理端口
 - 是否强制拉取最新镜像
 
-脚本自动识别 Docker 服务器架构并拉取对应的 `iceqi/xymediavault:beta` 镜像，同时自动检测媒体库挂载能力。首次安装检测可用时会自动挂载，之后可在管理后台控制。主服务默认管理 `iceqi/xymedia-tmm:beta`，稳定镜像和 `latest` 不会被 beta 安装覆盖。
+脚本自动识别 Docker 服务器架构并拉取对应的 `iceqi/xymediavault:beta` 镜像，同时自动检测媒体库挂载能力。首次安装检测可用时会自动挂载，之后可在管理后台控制。组件 tar.zst 覆盖包和组件运行时目录会保留。
 
 ## 更新
 
@@ -132,7 +132,7 @@ bash scripts/install.sh vault upgrade --channel stable --yes
 bash scripts/install.sh vault upgrade --dir /你的/XyMediaVault --yes
 ```
 
-更新过程会保留数据库、系统配置、小雅授权文件、Emby 配置和 TMM 数据。更新前会停止 XyMediaVault，并检查媒体库目录是否存在残留 FUSE 挂载；检测到挂载时会先卸载，再重建主容器并自动重新挂载。TMM 使用由应用管理的独立 bridge 网络，更新主容器时不会删除或重建 TMM 容器。
+更新过程会保留数据库、系统配置、小雅授权文件、Emby 配置、组件覆盖包和组件数据。更新前会停止 XyMediaVault，并检查媒体库目录是否存在残留 FUSE 挂载；检测到挂载时会先卸载，再重建主容器并自动重新挂载。
 
 ## 首次使用
 

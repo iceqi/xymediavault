@@ -24,7 +24,7 @@ PATH="$TMP/bin:$PATH"
 cat >"$TMP/fake-legacy.sh" <<'EOF'
 #!/usr/bin/env sh
 set -eu
-printf '%s|%s|%s|%s\n' "$IMAGE" "$XYMEDIA_TMM_IMAGE" "${1:-}" "${XYMEDIA_NON_INTERACTIVE:-}" >"$FAKE_LEGACY_LOG"
+printf '%s|%s|%s\n' "$IMAGE" "${1:-}" "${XYMEDIA_NON_INTERACTIVE:-}" >"$FAKE_LEGACY_LOG"
 mkdir -p "$1/data" "$1/components"
 printf 'services:\n  xymediavault:\n    image: %s\n    environment:\n      XYMEDIA_COMPONENT_RUNTIME: "local"\n    ports:\n      - "19080:8080"\n      - "19081:8081"\n      - "19082:8082"\n    volumes:\n      - ./data:/app/data\n      - ./tmm:/app/tmm\n      - ./components:/app/components\n      - ./mnt:/mnt/xymediavault\n  xiaoya-alist:\n    image: xiaoyaliu/alist:latest\n    ports:\n      - "15678:80"\n      - "12345:2345"\n      - "12346:2346"\n    volumes:\n      - ./xiaoya:/data\n' "$IMAGE" >"$1/docker-compose.yml"
 printf 'services:\n  xymediavault:\n    devices:\n      - /dev/fuse:/dev/fuse\n    cap_add:\n      - SYS_ADMIN\n    security_opt:\n      - apparmor:unconfined\n' >"$1/docker-compose.fuse.yml"
@@ -45,18 +45,8 @@ test "$(
 	channel_image stable vault
 )" = iceqi/xymediavault:latest
 # shellcheck disable=SC1091
-test "$(
-	. "$ROOT/scripts/lib/common.sh"
-	channel_image beta tmm
-)" = iceqi/xymedia-tmm:beta
-# shellcheck disable=SC1091
-test "$(
-	. "$ROOT/scripts/lib/common.sh"
-	channel_image stable title
-)" = iceqi/xymedia-title:stable
 FAKE_LEGACY_LOG="$TMP/legacy.log" XYMEDIA_LEGACY_INSTALLER="$TMP/fake-legacy.sh" "$INSTALL" vault install --channel beta --dir "$TMP/vault" --non-interactive >/dev/null
 test "$(cut -d'|' -f1 "$TMP/legacy.log")" = iceqi/xymediavault:beta
-test "$(cut -d'|' -f2 "$TMP/legacy.log")" = iceqi/xymedia-tmm:beta
 grep -q 'xiaoya-alist' "$TMP/vault/docker-compose.yml"
 grep -q './components:/app/components' "$TMP/vault/docker-compose.yml"
 test -d "$TMP/vault/components"
@@ -65,8 +55,7 @@ mkdir "$TMP/menu"
 (cd "$TMP/menu" && timeout 20 script -qec "printf '1\\n\\n0\\n' | env FAKE_LEGACY_LOG='$TMP/menu.log' XYMEDIA_LEGACY_INSTALLER='$TMP/fake-legacy.sh' $INSTALL menu" /dev/null)
 test -s "$TMP/menu.log"
 test "$(cut -d'|' -f1 "$TMP/menu.log")" = iceqi/xymediavault:latest
-test "$(cut -d'|' -f2 "$TMP/menu.log")" = iceqi/xymedia-tmm:latest
-test "$(cut -d'|' -f4 "$TMP/menu.log")" = false
+test "$(cut -d'|' -f3 "$TMP/menu.log")" = false
 lock="$TMP/lock"
 mkdir "$lock"
 printf '%s\n' "$$" >"$lock/pid"
@@ -76,11 +65,93 @@ mkdir "$lock"
 printf '999999\n' >"$lock/pid"
 XYMEDIA_LOCK_DIR="$lock" XYMEDIA_LEGACY_INSTALLER="$TMP/fake-legacy.sh" FAKE_LEGACY_LOG="$TMP/legacy.log" "$INSTALL" vault install --channel stable --dir "$TMP/vault2" --non-interactive >/dev/null 2>&1 || true
 test -f "$TMP/vault2/docker-compose.yml"
-XYMEDIA_INSTALL_DIR="$TMP/vault" "$INSTALL" status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["vault"] and d["title"]'
+XYMEDIA_INSTALL_DIR="$TMP/vault" "$INSTALL" status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["vault"]'
 set +e
 "$INSTALL" vault install --channel stable --dir "$TMP/vault" --non-interactive >/dev/null 2>&1
 test $? -ne 0
 set -e
+
+# Exercise the real legacy-install existing-install AWK rewrite path.
+REAL_TMP="$TMP/real-upgrade"
+REAL_BIN="$REAL_TMP/bin"
+REAL_INSTALL="$REAL_TMP/install"
+mkdir -p "$REAL_BIN" "$REAL_INSTALL/data" "$REAL_INSTALL/components" "$REAL_INSTALL/tmm/data"
+cat >"$REAL_INSTALL/docker-compose.yml" <<'EOF'
+services:
+  xymediavault:
+    image: iceqi/xymediavault:old
+    environment:
+      KEEP_EXISTING: "yes"
+      XYMEDIA_COMPONENT_RUNTIME: "local"
+    ports:
+      - "19080:8080"
+      - "19081:8081"
+      - "19082:8082"
+      - type: bind
+        source: ./components
+        target: /app/components
+      - ./tmm:/app/tmm
+EOF
+printf 'legacy component override\n' >"$REAL_INSTALL/components/title.tar.zst"
+cat >"$REAL_BIN/docker" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+printf '%s\n' "$*" >>"$REAL_DOCKER_LOG"
+case "$1" in
+  info) exit 0;;
+  version) printf 'amd64\n'; exit 0;;
+  context|ps|inspect) exit 0;;
+  compose)
+    [ "${2:-}" = version ] && printf 'Docker Compose version v2\n'
+    exit 0
+    ;;
+  container)
+    [ "${2:-}" = inspect ] && exit 0
+    exit 0
+    ;;
+  *)
+    case "$*" in
+      *xymediavault-tmm*|*xymedia-title-standalone*)
+        case "$1" in stop|start|restart|rm|remove|create) exit 99;; esac
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+EOF
+chmod +x "$REAL_BIN/docker"
+REAL_DOCKER_LOG="$REAL_TMP/docker.log" PATH="$REAL_BIN:$PATH" XYMEDIA_NON_INTERACTIVE=true XYMEDIA_ASSUME_YES=true FUSE_DEVICE_PATH="$REAL_TMP/missing-fuse" sh "$ROOT/scripts/legacy-install.sh" "$REAL_INSTALL" >/dev/null
+grep -q 'KEEP_EXISTING: "yes"' "$REAL_INSTALL/docker-compose.yml"
+grep -q 'target: /app/components' "$REAL_INSTALL/docker-compose.yml"
+grep -q './tmm:/app/tmm' "$REAL_INSTALL/docker-compose.yml"
+test -f "$REAL_INSTALL/components/title.tar.zst"
+! grep -Eq '(stop|start|restart|rm|remove|create).*(xymediavault-tmm|xymedia-title-standalone)' "$REAL_TMP/docker.log"
+
+REAL_LONG="$TMP/real-upgrade-long"
+mkdir -p "$REAL_LONG/data" "$REAL_LONG/components" "$REAL_LONG/tmm/data"
+cat >"$REAL_LONG/docker-compose.yml" <<'EOF'
+services:
+  xymediavault:
+    image: iceqi/xymediavault:old
+    environment:
+      KEEP_LONG: "yes"
+    ports:
+      - "19080:8080"
+      - "19081:8081"
+      - "19082:8082"
+    volumes:
+      - type: bind
+        source: ./components
+        target: /app/components
+      - type: bind
+        source: ./tmm
+        target: /app/tmm
+EOF
+REAL_DOCKER_LOG="$REAL_TMP/docker-long.log" PATH="$REAL_BIN:$PATH" XYMEDIA_NON_INTERACTIVE=true XYMEDIA_ASSUME_YES=true FUSE_DEVICE_PATH="$REAL_TMP/missing-fuse" sh "$ROOT/scripts/legacy-install.sh" "$REAL_LONG" >/dev/null
+grep -q 'target: /app/components' "$REAL_LONG/docker-compose.yml"
+grep -q 'target: /app/tmm' "$REAL_LONG/docker-compose.yml"
+grep -q 'KEEP_LONG: "yes"' "$REAL_LONG/docker-compose.yml"
+
 BOOTSTRAP_INPUT="$TMP/bootstrap-input.sh"
 BOOTSTRAP_ARCHIVE="$TMP/bootstrap.tar.gz"
 cp "$INSTALL" "$BOOTSTRAP_INPUT"

@@ -1,8 +1,6 @@
 #!/usr/bin/env sh
 XYMEDIA_INSTALLER_VERSION=${XYMEDIA_INSTALLER_VERSION:-beta}
 VAULT_IMAGE_BASE=iceqi/xymediavault
-TMM_IMAGE_BASE=iceqi/xymedia-tmm
-TITLE_IMAGE_BASE=iceqi/xymedia-title
 is_tty() { [ -t 0 ] && [ -t 1 ]; }
 log() { printf '[xymedia] %s\n' "$*"; }
 die() {
@@ -13,7 +11,7 @@ die2() {
 	printf '[xymedia] ERROR: %s\n' "$*" >&2
 	exit 2
 }
-channel_image() { case "$1:$2" in stable:vault) printf '%s:latest' "$VAULT_IMAGE_BASE" ;; beta:vault) printf '%s:beta' "$VAULT_IMAGE_BASE" ;; stable:tmm) printf '%s:latest' "$TMM_IMAGE_BASE" ;; beta:tmm) printf '%s:beta' "$TMM_IMAGE_BASE" ;; stable:title) printf '%s:stable' "$TITLE_IMAGE_BASE" ;; beta:title) printf '%s:beta' "$TITLE_IMAGE_BASE" ;; *) return 1 ;; esac }
+channel_image() { case "$1:$2" in stable:vault) printf '%s:latest' "$VAULT_IMAGE_BASE" ;; beta:vault) printf '%s:beta' "$VAULT_IMAGE_BASE" ;; *) return 1 ;; esac }
 valid_channel() { [ "$1" = stable ] || [ "$1" = beta ]; }
 docker_ready() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
 compose_cmd() { if docker compose version >/dev/null 2>&1; then printf 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf docker-compose; else return 1; fi; }
@@ -89,19 +87,16 @@ env_report() {
 version_report() {
 	dir=$(install_dir)
 	printf 'Installer: %s\nVault channel: %s\n' "$XYMEDIA_INSTALLER_VERSION" "$(read_channel "$dir")"
-	for c in xymediavault xymedia-title-standalone xymediavault-tmm; do if container_exists "$c"; then printf '%s: %s\n' "$c" "$(container_state "$c") $(docker inspect --format '{{.Config.Image}} {{.Image}}' "$c" 2>/dev/null || printf unknown)"; else printf '%s: not installed\n' "$c"; fi; done
+	if container_exists xymediavault; then printf '%s: %s\n' xymediavault "$(container_state xymediavault) $(docker inspect --format '{{.Config.Image}} {{.Image}}' xymediavault 2>/dev/null || printf unknown)"; else printf '%s\n' 'xymediavault: not installed'; fi
 }
 status_report() {
 	if [ "${1:-}" = --json ]; then
 		dir=$(install_dir)
 		v=$(read_channel "$dir")
-		title_status=$(container_state "$(title_name)")
-		title_version_json=unknown
-		if [ "$title_status" = running ] && owned_standalone; then title_version_json=$(title_version 2>/dev/null || printf unknown); fi
-		printf '{"installer":"%s","vault_channel":"%s","vault":{"status":"%s","image":"%s"},"tmm":{"status":"%s","image":"%s"},"title":{"status":"%s","image":"%s","version":"%s"}}\n' "$(json_quote "$XYMEDIA_INSTALLER_VERSION")" "$(json_quote "$v")" "$(container_state xymediavault)" "$(json_quote "$(container_image xymediavault)")" "$(container_state xymediavault-tmm)" "$(json_quote "$(container_image xymediavault-tmm)")" "$title_status" "$(json_quote "$(container_image xymedia-title-standalone)")" "$(json_quote "$title_version_json")"
+		printf '{"installer":"%s","vault_channel":"%s","vault":{"status":"%s","image":"%s"}}\n' "$(json_quote "$XYMEDIA_INSTALLER_VERSION")" "$(json_quote "$v")" "$(container_state xymediavault)" "$(json_quote "$(container_image xymediavault)")"
 		return 0
 	fi
-	for c in xymediavault xymedia-title-standalone xymediavault-tmm; do if container_exists "$c"; then docker inspect --format "$c: {{.State.Status}} ({{.Config.Image}})" "$c" 2>/dev/null || true; else printf '%s: not installed\n' "$c"; fi; done
+	if container_exists xymediavault; then docker inspect --format 'xymediavault: {{.State.Status}} ({{.Config.Image}})' xymediavault 2>/dev/null || true; else printf '%s\n' 'xymediavault: not installed'; fi
 }
 container_health() {
 	name=$1
