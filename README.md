@@ -10,10 +10,10 @@ XyMediaVault 是面向小雅 Alist、Emby、Jellyfin、Infuse 和 TVBox 的媒�
 
 ```bash
 curl -fsSL \
-  https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.3.0/bootstrap.sh \
+  https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.3.2/bootstrap.sh \
   | XYMEDIA_INSTALL_DIR=/opt/xymedia \
     XYMEDIA_SKIP_SIGNATURE_VERIFY=1 \
-    sh -s -- v1.3.0
+    sh -s -- v1.3.2
 ```
 
 将 `/opt/xymedia` 替换为希望使用的安装目录，例如：
@@ -26,10 +26,10 @@ curl -fsSL \
 
 ```bash
 curl -fsSL \
-  https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.3.0-beta.1/bootstrap.sh \
+  https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.3.4-beta.1/bootstrap.sh \
   | XYMEDIA_INSTALL_DIR=/opt/xymedia \
     XYMEDIA_SKIP_SIGNATURE_VERIFY=1 \
-    sh -s -- v1.3.0-beta.1
+    sh -s -- v1.3.4-beta.1
 ```
 
 安装器默认通过 `https://gh-proxy.org/` 下载 GitHub Release 资产，但仍会校验 SHA-256。设置 `XYMEDIA_DOWNLOAD_PROXY=` 可改为直连 GitHub。
@@ -83,14 +83,14 @@ linux/arm64
 - 小雅数据；
 - 更新备份。
 
-例如升级到正式版 1.3.0：
+例如升级到正式版 1.3.2：
 
 ```bash
 curl -fsSL \
-  https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.3.0/bootstrap.sh \
+  https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.3.2/bootstrap.sh \
   | XYMEDIA_INSTALL_DIR=/opt/xymedia \
     XYMEDIA_SKIP_SIGNATURE_VERIFY=1 \
-    sh -s -- v1.3.0
+    sh -s -- v1.3.2
 ```
 
 旧 bundled PostgreSQL 版本不能直接覆盖安装，请使用 Release 中的 `upgrade-from-bundled.sh`，并先备份原数据卷。
@@ -119,6 +119,39 @@ apparmor:unconfined
 ```
 
 仅应在受信任宿主机启用。
+
+### 一键重新挂载
+
+1.3.2 起 Release 提供 `remount-fuse.sh`。当挂载目录出现：
+
+```text
+transport endpoint is not connected
+```
+
+执行：
+
+```bash
+cd /opt/xymedia
+sh remount-fuse.sh
+```
+
+指定其他安装目录：
+
+```bash
+XYMEDIA_INSTALL_DIR=/vol2/1000/xymedia sh remount-fuse.sh
+```
+
+脚本只停止应用容器，不停止 PostgreSQL；它会卸载失效端点、重建目录、使用 FUSE override 启动应用并等待健康检查。
+
+## 最新 Beta 修复
+
+`v1.3.4-beta.1` 包含：
+
+- 修复作品库海报接口错误返回 404；
+- 修复媒体库挂载选择“刮削媒体库”后刷新回到“索引目录模式”；
+- 修复 WebDAV 用户的 `LIBRARY` 模式显示/保存回退；
+- 修复 Xiaoya `AliyundriveCron` 无参数刷新时拿到空 Token 并报 `invalid_client_id`；
+- 保留外部刷新接口不泄露本地 refresh token，仅内部代理可读取共享配置。
 
 ## 1.3 路径变化
 
