@@ -12,13 +12,13 @@ cat > "$TMP/bin/curl" <<'EOF'
 #!/usr/bin/env sh
 set -eu
 out=; url=
-while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift 2;; https://*) url=$1; shift;; -H) shift 2;; *) shift;; esac; done
+while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift 2;; https://*) url=$1; shift;; -H) printf 'header:%s\n' "$2" >> "$XYMEDIA_TEST_LOG"; shift 2;; *) shift;; esac; done
 printf '%s\n' "$url" >> "$XYMEDIA_TEST_LOG"
 case "$url" in
-  https://api.github.com/repos/iceqi/xymedia-title/releases/tags/component-sha-007ed892afaf)
-    printf '%s\n' '{"tag_name":"component-sha-007ed892afaf","assets":[{"id":101,"name":"xymedia-title-sha-007ed892afaf-linux-amd64.tar.zst"},{"id":102,"name":"xymedia-title-sha-007ed892afaf-linux-amd64.tar.zst.sha256"}]}' > "$out";;
-  https://api.github.com/repos/iceqi/xymedia-title/releases/assets/101) cp "$XYMEDIA_TEST_ARCHIVE" "$out";;
-  https://api.github.com/repos/iceqi/xymedia-title/releases/assets/102) printf '%s  archive\n' "$XYMEDIA_TEST_HASH" > "$out";;
+  https://github.com/iceqi/xymedia-components/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst) cp "$XYMEDIA_TEST_ARCHIVE" "$out";;
+  https://github.com/iceqi/xymedia-components/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst.sha256) printf '%s  archive\n' "$XYMEDIA_TEST_HASH" > "$out";;
+  https://github.com/iceqi/xymedia-components/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst) cp "$XYMEDIA_TEST_ARCHIVE" "$out";;
+  https://github.com/iceqi/xymedia-components/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst.sha256) printf '%s  archive\n' "$XYMEDIA_TEST_HASH" > "$out";;
   *) exit 1;;
 esac
 EOF
@@ -37,9 +37,9 @@ cat > "$TMP/bin/tar" <<'EOF'
 #!/usr/bin/env sh
 set -eu
 case "$1" in
-  -xOf) shift 2; case "$1" in manifest.json) printf '%s' "$XYMEDIA_TEST_MANIFEST";; payload/title.bin) printf '%s' payload;; *) exit 1;; esac;;
-  -tvf) printf '%s\n' '-rw-r--r-- manifest.json' '-rw-r--r-- payload/title.bin';;
-  -tf) printf '%s\n' manifest.json payload/title.bin;;
+  -xOf) shift 2; case "$1" in manifest.json) printf '%s' "$XYMEDIA_TEST_MANIFEST";; payload/title.bin|payload/tmm.bin) printf '%s' payload;; *) exit 1;; esac;;
+  -tvf) printf '%s\n' '-rw-r--r-- manifest.json' "-rw-r--r-- payload/$XYMEDIA_TEST_COMPONENT.bin";;
+  -tf) printf '%s\n' manifest.json "payload/$XYMEDIA_TEST_COMPONENT.bin";;
 esac
 EOF
 cat > "$TMP/bin/sha256sum" <<'EOF'
@@ -64,39 +64,46 @@ if [ "${XYMEDIA_FAIL_STOP:-false}" = true ] && [ "$1" = stop ]; then exit 1; fi
 EOF
 chmod +x "$TMP/bin"/*
 export PATH="$TMP/bin:$PATH" XYMEDIA_REAL_JQ="$REAL_JQ" XYMEDIA_TEST_LOG="$TMP/curl.log" XYMEDIA_JQ_LOG="$TMP/jq.log" XYMEDIA_DOCKER_LOG="$TMP/docker.log"
-export GH_TOKEN=test-token
+unset GH_TOKEN GITHUB_TOKEN
 touch "$TMP/docker.log"
 export XYMEDIA_DOCKER_RUN_MARKER="$TMP/docker-run.marker"
-export XYMEDIA_TEST_HASH=ea719e6a86907b44b79ab0dc5fef43e83adb89706bf50973d4b3353b168f0534
+export XYMEDIA_TEST_HASH=201443ee5b61a447ed4edb551d23a57bde2f6bfb68520d2891c6cd66f0fb2b1f
 export XYMEDIA_TEST_ARCHIVE="$TMP/archive"
+export XYMEDIA_TEST_COMPONENT=title
 set_manifest() {
   XYMEDIA_TEST_MANIFEST=$(printf '%s' "$1")
   export XYMEDIA_TEST_MANIFEST
 }
-set_manifest '{"schema_version":1,"component":"title","release_version":"sha-007ed892afaf","platform":"linux/amd64","files":{"payload/title.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
+set_manifest '{"schema_version":1,"component":"title","release_version":"sha-ab7f33d6ede5","platform":"linux/amd64","files":{"payload/title.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
 printf '%s' 'fake archive' > "$TMP/archive"
 
+printf '%s\n' '{"title":{"repository":"iceqi/xymedia-components","tag":"component-sha-007ed892afaf","release_version":"sha-007ed892afaf","assets":{}},"tmm":{"repository":"iceqi/xymedia-components","tag":"tmm-component-sha-a0206a51fd9e","release_version":"sha-a0206a51fd9e","assets":{}}}' > "$TMP/legacy-lock.json"
 set +e
-env -u GH_TOKEN -u GITHUB_TOKEN "$SCRIPT" --install-dir "$TMP" --component title --dry-run >/dev/null 2>&1
+"$SCRIPT" --install-dir "$TMP" --component title --dry-run --lock-file "$TMP/legacy-lock.json" >/dev/null 2>&1
 test $? -eq 2
 set -e
-test ! -s "$TMP/curl.log"
 
 "$SCRIPT" --install-dir "$TMP" --component title --dry-run >/dev/null
-grep -q '/releases/tags/component-sha-007ed892afaf$' "$TMP/curl.log"
-grep -q '/releases/assets/101$' "$TMP/curl.log"
-grep -q '/releases/assets/102$' "$TMP/curl.log"
+grep -q '/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst$' "$TMP/curl.log"
+grep -q '/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst.sha256$' "$TMP/curl.log"
+if grep -q 'api.github.com\|Authorization\|Bearer' "$TMP/curl.log"; then exit 1; fi
 test ! -s "$TMP/docker.log"
-if grep -q 'test-token' "$TMP/curl.log" "$TMP/jq.log" "$TMP/docker.log"; then exit 1; fi
 
-set_manifest '{"schema_version":1,"component":"title","release_version":"component-sha-007ed892afaf","platform":"linux/amd64","files":{"payload/title.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
+export XYMEDIA_TEST_COMPONENT=tmm XYMEDIA_TEST_HASH=57ee0cdf0cf2127678ab598dfb8e9047e6aa903443f8d616955533e6cca0cfea
+set_manifest '{"schema_version":1,"component":"tmm","release_version":"sha-a0206a51fd9e","platform":"linux/any","files":{"payload/tmm.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
+"$SCRIPT" --install-dir "$TMP" --component tmm --dry-run >/dev/null
+grep -q '/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst$' "$TMP/curl.log"
+grep -q '/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst.sha256$' "$TMP/curl.log"
+
+export XYMEDIA_TEST_COMPONENT=title XYMEDIA_TEST_HASH=201443ee5b61a447ed4edb551d23a57bde2f6bfb68520d2891c6cd66f0fb2b1f
+set_manifest '{"schema_version":1,"component":"title","release_version":"wrong-version","platform":"linux/amd64","files":{"payload/title.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
 set +e
 "$SCRIPT" --install-dir "$TMP" --component title --dry-run >/dev/null 2>&1
 test $? -eq 2
 set -e
 test ! -s "$TMP/docker.log"
 
-set_manifest '{"schema_version":1,"component":"title","release_version":"sha-007ed892afaf","platform":"linux/amd64","files":{"payload/title.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
+set_manifest '{"schema_version":1,"component":"title","release_version":"sha-ab7f33d6ede5","platform":"linux/amd64","files":{"payload/title.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
 "$SCRIPT" --install-dir "$TMP" --component title >/dev/null 2>&1 || test $? -eq 1
 if grep -Eq '^(stop|start|run) ' "$TMP/docker.log"; then exit 1; fi
 export XYMEDIA_FAIL_STOP=true

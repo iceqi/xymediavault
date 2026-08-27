@@ -69,7 +69,7 @@ sh scripts/update-components.sh --install-dir /opt/xymedia --component tmm --yes
 sh scripts/update-components.sh --install-dir /opt/xymedia --component all --yes
 ```
 
-默认精确锁定 Title `component-sha-007ed892afaf` 和 TMM `component-sha-61e9e46df421`，并锁定各架构资产及 SHA-256。这些私有 GitHub Release 必须先设置 `GH_TOKEN` 或 `GITHUB_TOKEN`；脚本不会打印 token。首次操作应先运行 `--dry-run`，真正写入必须显式提供 `--yes`。
+默认从公开的 [iceqi/xymedia-components Releases](https://github.com/iceqi/xymedia-components/releases) 直接获取固定资产，不查询 API 或 `latest`。当前精确锁定 Title `title-component-sha-ab7f33d6ede5`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/title-component-sha-ab7f33d6ede5)）和 TMM `tmm-component-sha-a0206a51fd9e`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/tmm-component-sha-a0206a51fd9e)），包括各架构资产及 SHA-256。首次操作应先运行 `--dry-run`，真正写入必须显式提供 `--yes`。
 
 脚本会先下载并验证两个归档，再停止应用。它要求 `.env` 中的 `XYMEDIA_APP_CONTAINER`（缺省 `xymedia-app`）、`/app/components` named volume、本地 `alpine:3.22`，并仅重启该应用容器；不支持 bind/anonymous volume。备份位于 volume 的 `.xymedia-component-backups/时间戳/`。应用容器健康检查失败时会尝试恢复选中归档并重启，但脚本无法替代组件业务健康检查，请再检查管理后台。
 

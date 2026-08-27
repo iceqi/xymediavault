@@ -131,7 +131,7 @@ sh update-components.sh --install-dir /opt/xymedia --component title --dry-run
 sh update-components.sh --install-dir /opt/xymedia --component title --yes
 ```
 
-`--component` 可选 `title`、`tmm` 或 `all`。当前锁定版本为 Title `component-sha-007ed892afaf`、TMM `component-sha-61e9e46df421`；这些是私有 Release，下载前必须设置 `GH_TOKEN` 或 `GITHUB_TOKEN`。需要变更锁时，使用经过人工审阅的绝对路径 JSON `--lock-file`，不要通过仓库或 tag 环境变量覆盖。
+`--component` 可选 `title`、`tmm` 或 `all`。脚本从公开的 [xymedia-components Releases](https://github.com/iceqi/xymedia-components/releases) 直接下载固定资产，不查询 API 或 `latest`。当前锁定 Title `title-component-sha-ab7f33d6ede5`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/title-component-sha-ab7f33d6ede5)）和 TMM `tmm-component-sha-a0206a51fd9e`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/tmm-component-sha-a0206a51fd9e)）。需要变更锁时，使用经过人工审阅的绝对路径 JSON `--lock-file`，不要通过仓库或 tag 环境变量覆盖。
 
 更新前会完成下载、checksum、zstd/tar 路径和 manifest payload 校验；`all` 在两者都通过前不会停止应用。脚本只接受 `.env` 中的 `XYMEDIA_APP_CONTAINER`（默认 `xymedia-app`），要求 `/app/components` 是 named Docker volume，并只停止/启动应用容器。替换前的组件归档保存在该 volume 的 `.xymedia-component-backups/` 下。脚本要求本地已有 `alpine:3.22`，不会在维护窗口自动拉取镜像。
 
