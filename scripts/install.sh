@@ -124,6 +124,35 @@ status_print() {
 	fi
 }
 
+configure_download_url() {
+	raw_url=$1
+	proxy=${XYMEDIA_DOWNLOAD_PROXY-https://gh-proxy.org/}
+	download_mode=直连
+	download_url=$raw_url
+	if [ -n "$proxy" ]; then
+		while [ "${proxy%/}" != "$proxy" ]; do proxy=${proxy%/}; done
+		case "$proxy" in
+		https://*) ;;
+		*) error '生产环境 XYMEDIA_DOWNLOAD_PROXY 必须使用 HTTPS。' ;;
+		esac
+		download_url="$proxy/$raw_url"
+		download_mode=代理
+	fi
+}
+
+download_public_script() {
+	label=$1
+	raw_url=$2
+	destination=$3
+	configure_download_url "$raw_url"
+	status_print "正在下载$label（使用${download_mode}）..."
+	if [ "$interactive" -eq 1 ]; then
+		curl --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 1 --progress-bar -fsSL "$download_url" -o "$destination" 2>&4
+	else
+		curl --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 1 -fsSL "$download_url" -o "$destination"
+	fi
+}
+
 updater_tmp=
 migration_tmp=
 reset_tmp=
@@ -140,8 +169,8 @@ run_component_updater() {
 	component=$1
 	install_dir=$2
 	updater_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-component-updater.XXXXXX") || error '无法创建组件更新临时文件。'
-	if ! curl --proto '=https' --tlsv1.2 -fsSL "$component_updater_url" -o "$updater_tmp"; then
-		error '无法下载组件更新器，请稍后重试。'
+	if ! download_public_script '组件更新器' "$component_updater_url" "$updater_tmp"; then
+		error "无法下载组件更新器（使用${download_mode}，目标：$download_url）。请设置 XYMEDIA_DOWNLOAD_PROXY='' 可直连重试。"
 	fi
 	sh "$updater_tmp" --install-dir "$install_dir" --component "$component" --dry-run >&4 2>&4
 	menu_print '验证完成。实际更新会停止并重启应用容器，是否继续？[y/N]：'
@@ -181,8 +210,8 @@ component_menu() {
 run_storage_migration() {
 	install_dir=$1
 	migration_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-storage-migration.XXXXXX") || error '无法创建组件迁移临时文件。'
-	if ! curl --proto '=https' --tlsv1.2 -fsSL "$migration_url" -o "$migration_tmp"; then
-		error '无法下载组件存储迁移脚本，请稍后重试。'
+	if ! download_public_script '组件存储迁移脚本' "$migration_url" "$migration_tmp"; then
+		error "无法下载组件存储迁移脚本（使用${download_mode}，目标：$download_url）。请设置 XYMEDIA_DOWNLOAD_PROXY='' 可直连重试。"
 	fi
 	menu_print '预检模式不会改变 Docker 状态，开始验证组件存储迁移。'
 	if ! sh "$migration_tmp" --install-dir "$install_dir" --dry-run >&4 2>&4; then
@@ -203,8 +232,8 @@ run_fresh_reset() {
 	validate_path_text "$install_dir"
 	select_utf8_locale "$install_dir"
 	reset_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-reset-script.XXXXXX") || error '无法创建重置临时文件。'
-	if ! curl --proto '=https' --tlsv1.2 -fsSL "$reset_url" -o "$reset_tmp"; then
-		error '无法下载全新重置脚本，请稍后重试。'
+	if ! download_public_script '全新重置脚本' "$reset_url" "$reset_tmp"; then
+		error "无法下载全新重置脚本（使用${download_mode}，目标：$download_url）。请设置 XYMEDIA_DOWNLOAD_PROXY='' 可直连重试。"
 	fi
 	menu_print '开始执行全新重置。请按重置脚本提示完成两次确认。'
 	if ! sh "$reset_tmp" --install-dir "$install_dir" --project "$project" >&4 2>&4; then
@@ -287,17 +316,8 @@ tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-bootstrap.XXXXXX") || error '无法创建�
 bootstrap_tmp=$tmp
 
 asset="https://github.com/iceqi/xymediavault/releases/download/$release/bootstrap.sh"
-proxy=${XYMEDIA_DOWNLOAD_PROXY-https://gh-proxy.org/}
-download_mode=直连
-if [ -n "$proxy" ]; then
-	while [ "${proxy%/}" != "$proxy" ]; do proxy=${proxy%/}; done
-	case "$proxy" in
-	https://*) ;;
-	*) error '生产环境 XYMEDIA_DOWNLOAD_PROXY 必须使用 HTTPS。' ;;
-	esac
-	asset="$proxy/$asset"
-	download_mode=代理
-fi
+configure_download_url "$asset"
+asset=$download_url
 
 if [ "$interactive" -eq 1 ] && [ "${menu_install:-0}" -eq 1 ]; then
 	status_print "[1/2] 正在下载 $release 安装引导脚本..."

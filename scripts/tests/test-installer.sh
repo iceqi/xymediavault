@@ -26,7 +26,15 @@ printf '%s\n' "$progress" >>"${XYMEDIA_TEST_PROGRESS_LOG:-/dev/null}"
 if [ "${XYMEDIA_TEST_CURL_FAIL:-0}" -eq 1 ] && case "$url" in *'/releases/download/'*) true;; *) false;; esac; then
 	  exit 1
 fi
-case "$url" in
+source_url=$url
+case "$source_url" in
+  https://gh-proxy.org/https://raw.githubusercontent.com/*) source_url=${source_url#https://gh-proxy.org/};;
+  https://proxy.example/https://raw.githubusercontent.com/*) source_url=${source_url#https://proxy.example/};;
+esac
+if [ "${XYMEDIA_TEST_HELPER_CURL_FAIL:-0}" -eq 1 ] && case "$source_url" in https://raw.githubusercontent.com/*/scripts/*) true;; *) false;; esac; then
+	  exit 1
+fi
+case "$source_url" in
   https://raw.githubusercontent.com/iceqi/xymediavault/*/scripts/update-components.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_UPDATER_LOG"' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
   https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh)
@@ -79,12 +87,22 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(sed -n '1p' "$TMP/reset.log")" = "$TMP/fresh|xymedia"
 test "$(sed -n '1p' "$TMP/url.log")" = \
-	'https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
+	'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
 test "$(sed -n '2p' "$TMP/url.log")" = \
 	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+test "$(sed -n '2p' "$TMP/progress.log")" = 1
 test "$(cut -d'|' -f1 "$TMP/bootstrap.log")" = v1.4.0
 test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = install
 test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/fresh"
+
+printf '%s\n' 5 "$TMP/fresh" '' 6 >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_DOWNLOAD_PROXY='' \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" XYMEDIA_TEST_EXPECTED_RESET_DIR="$TMP/fresh" XYMEDIA_TEST_EXPECTED_RESET_PROJECT=xymedia \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+test "$(sed -n '1p' "$TMP/url.log")" = \
+	'https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
 
 mkdir -p "$TMP/custom"
 printf '%s\n' 5 "$TMP/custom" xymedia_test 6 >"$TMP/tty-input"
@@ -108,6 +126,18 @@ test "$invalid_status" -ne 0
 grep -q 'Compose 项目名格式无效' "$TMP/tty-input"
 test ! -e "$TMP/url.log"
 test ! -e "$TMP/bootstrap.log"
+
+printf '%s\n' 5 "$TMP/fresh" >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log"
+set +e
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_HELPER_CURL_FAIL=1 \
+  XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+  XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null 2>&1
+reset_download_status=$?
+set -e
+test "$reset_download_status" -ne 0
+grep -q '无法下载全新重置脚本' "$TMP/tty-input"
+grep -q "XYMEDIA_DOWNLOAD_PROXY='' 可直连重试" "$TMP/tty-input"
 
 printf '%s\n' 5 "$TMP/fresh" >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
@@ -147,9 +177,10 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(tr -d '\n' <"$TMP/url.log")" = \
-	'https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
+	'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
 test "$(sed -n '1p' "$TMP/migration.log")" = '--install-dir /srv/xymedia --dry-run'
 test "$(sed -n '2p' "$TMP/migration.log")" = '--install-dir /srv/xymedia --yes'
+test "$(sed -n '1p' "$TMP/progress.log")" = 1
 test ! -e "$TMP/bootstrap.sh"
 if grep -q '/main/scripts/migrate-components-storage.sh' "$TMP/url.log"; then exit 1; fi
 
@@ -203,9 +234,10 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(tr -d '\n' <"$TMP/url.log")" = \
-  'https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
+  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
 test "$(sed -n '1p' "$TMP/updater.log")" = "--install-dir $(pwd -P) --component title --dry-run"
 test "$(sed -n '2p' "$TMP/updater.log")" = "--install-dir $(pwd -P) --component title --yes"
+test "$(sed -n '1p' "$TMP/progress.log")" = 1
 if grep -q '/main/scripts/update-components.sh' "$TMP/url.log"; then exit 1; fi
 
 printf '%s\n' 2 4 4 >"$TMP/tty-input"
