@@ -39,10 +39,10 @@ case "$source_url" in
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_UPDATER_LOG"' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
   https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_MIGRATION_LOG"' 'if [ "${XYMEDIA_TEST_MIGRATION_FAIL:-0}" -eq 1 ] && case " $* " in *" --dry-run "*) true;; *) false;; esac; then exit 1; fi' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
-  https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh)
-    printf '%s\n' '#!/usr/bin/env sh' 'test "$#" -eq 4' 'test "$1" = --install-dir' 'test "$2" = "$XYMEDIA_TEST_EXPECTED_RESET_DIR"' 'test "$3" = --project' 'test "$4" = "$XYMEDIA_TEST_EXPECTED_RESET_PROJECT"' 'printf "%s|%s\\n" "$2" "$4" >>"$XYMEDIA_TEST_RESET_LOG"' 'if [ "${XYMEDIA_TEST_RESET_FAIL:-0}" -eq 1 ]; then exit 1; fi' >"$destination";;
+  https://raw.githubusercontent.com/iceqi/xymediavault/bf0703b39160ad369ca3b82d59c37d3f719ebe61/scripts/reset-fresh-install.sh)
+    printf '%s\n' '#!/usr/bin/env sh' 'test "$#" -eq 4' 'test "$1" = --install-dir' 'test "$2" = "$XYMEDIA_TEST_EXPECTED_RESET_DIR"' 'test "$3" = --project' 'test "$4" = "$XYMEDIA_TEST_EXPECTED_RESET_PROJECT"' 'printf "%s|%s\\n" "$2" "$4" >>"$XYMEDIA_TEST_RESET_LOG"' 'IFS= read -r confirm1 <&3 || :' 'IFS= read -r confirm2 <&3 || :' '[ "$confirm1" = 1 ] && [ "$confirm2" = 1 ] || exit 3' 'if [ "${XYMEDIA_TEST_RESET_FAIL:-0}" -eq 1 ]; then exit 1; fi' >"$destination";;
   *)
-    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s|%s|%s\\n" "$1" "${XYMEDIA_COMMAND:-}" "${XYMEDIA_FUSE_MODE:-}" "${XYMEDIA_INSTALL_DIR:-}" "${LC_ALL:-}" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
+    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s|%s|%s|%s\\n" "$1" "${XYMEDIA_COMMAND:-}" "${XYMEDIA_FUSE_MODE:-}" "${XYMEDIA_INSTALL_DIR:-}" "${LC_ALL:-}" "${XYMEDIA_FUSE_HOST_PATH:-}" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' 'if [ "${XYMEDIA_TEST_INTERNAL_FUSE_PROMPT:-0}" -eq 1 ]; then printf "%s\\n" internal-fuse-prompt >>"$XYMEDIA_TEST_BOOTSTRAP_LOG"; fi' >"$destination";;
 esac
 EOF
 cat >"$TMP/bin/mktemp" <<'EOF'
@@ -79,7 +79,7 @@ test ! -e "$TMP/url.log"
 test ! -e "$TMP/updater.log"
 
 mkdir -p "$TMP/fresh"
-printf '%s\n' 5 "$TMP/fresh" '' >"$TMP/tty-input"
+printf '%s\n' 5 "$TMP/fresh" '' 1 1 2 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
@@ -87,25 +87,31 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(sed -n '1p' "$TMP/reset.log")" = "$TMP/fresh|xymedia"
 test "$(sed -n '1p' "$TMP/url.log")" = \
-	'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
+  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/bf0703b39160ad369ca3b82d59c37d3f719ebe61/scripts/reset-fresh-install.sh'
 test "$(sed -n '2p' "$TMP/url.log")" = \
 	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 test "$(sed -n '2p' "$TMP/progress.log")" = 1
 test "$(cut -d'|' -f1 "$TMP/bootstrap.log")" = v1.4.0
 test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = install
 test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/fresh"
+test "$(cut -d'|' -f3 "$TMP/bootstrap.log")" = none
 
-printf '%s\n' 5 "$TMP/fresh" '' 6 >"$TMP/tty-input"
+printf '%s\n' 5 "$TMP/fresh" '' 1 2 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
+set +e
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_DOWNLOAD_PROXY='' \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" XYMEDIA_TEST_EXPECTED_RESET_DIR="$TMP/fresh" XYMEDIA_TEST_EXPECTED_RESET_PROJECT=xymedia \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+cancel_status=$?
+set -e
+test "$cancel_status" -ne 0
+test ! -e "$TMP/bootstrap.log"
 test "$(sed -n '1p' "$TMP/url.log")" = \
-	'https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
+  'https://raw.githubusercontent.com/iceqi/xymediavault/bf0703b39160ad369ca3b82d59c37d3f719ebe61/scripts/reset-fresh-install.sh'
 
 mkdir -p "$TMP/custom"
-printf '%s\n' 5 "$TMP/custom" xymedia_test 6 >"$TMP/tty-input"
+printf '%s\n' 5 "$TMP/custom" xymedia_test 1 1 2 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
@@ -127,7 +133,7 @@ grep -q 'Compose 项目名格式无效' "$TMP/tty-input"
 test ! -e "$TMP/url.log"
 test ! -e "$TMP/bootstrap.log"
 
-printf '%s\n' 5 "$TMP/fresh" >"$TMP/tty-input"
+printf '%s\n' 5 "$TMP/fresh" 1 1 2 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log"
 set +e
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_HELPER_CURL_FAIL=1 \
@@ -139,7 +145,7 @@ test "$reset_download_status" -ne 0
 grep -q '无法下载全新重置脚本' "$TMP/tty-input"
 grep -q "XYMEDIA_DOWNLOAD_PROXY='' 可直连重试" "$TMP/tty-input"
 
-printf '%s\n' 5 "$TMP/fresh" >"$TMP/tty-input"
+printf '%s\n' 5 "$TMP/fresh" 1 1 2 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
 set +e
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_CURL_FAIL=0 XYMEDIA_TEST_RESET_FAIL=1 XYMEDIA_TEST_EXPECTED_RESET_DIR="$TMP/fresh" XYMEDIA_TEST_EXPECTED_RESET_PROJECT=xymedia \
@@ -150,7 +156,7 @@ reset_status=$?
 set -e
 test "$reset_status" -ne 0
 test ! -e "$TMP/bootstrap.log"
-if grep -Eq 'b42c25467de718575f68230edfb7947f467db915|raw.githubusercontent.com/iceqi/xymediavault/main/scripts/reset-fresh-install.sh' "$ROOT/scripts/install.sh" "$ROOT/scripts/tests/test-installer.sh"; then exit 1; fi
+if grep -q 'raw.githubusercontent.com/iceqi/xymediavault/main/scripts/reset-fresh-install.sh' "$ROOT/scripts/install.sh"; then exit 1; fi
 
 printf '%s\n' 6 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
@@ -172,10 +178,10 @@ test "$(grep -Fc '请输入 1、2、3、4、5 或 6。' "$TMP/tty-input")" -ge 1
 test ! -e "$TMP/url.log"
 
 printf '%s\n' 4 /srv/xymedia y >"$TMP/tty-input"
-rm -f "$TMP/url.log" "$TMP/migration.log"
+rm -f "$TMP/url.log" "$TMP/migration.log" "$TMP/progress.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(tr -d '\n' <"$TMP/url.log")" = \
 	'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
 test "$(sed -n '1p' "$TMP/migration.log")" = '--install-dir /srv/xymedia --dry-run'
@@ -185,7 +191,7 @@ test ! -e "$TMP/bootstrap.sh"
 if grep -q '/main/scripts/migrate-components-storage.sh' "$TMP/url.log"; then exit 1; fi
 
 printf '%s\n' 4 '' n >"$TMP/tty-input"
-rm -f "$TMP/url.log" "$TMP/migration.log"
+rm -f "$TMP/url.log" "$TMP/migration.log" "$TMP/progress.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
@@ -270,7 +276,7 @@ test ! -e "$TMP/url.log"
 test ! -e "$TMP/migration.log"
 
 mkdir -p "$TMP/install-choice"
-printf '%s\n' 1 "$TMP/install-choice" >"$TMP/tty-input"
+printf '%s\n' 1 "$TMP/install-choice" 2 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/progress.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
@@ -284,8 +290,9 @@ grep -q '\[1/2\] 正在下载 v1.4.0 安装引导脚本' "$TMP/tty-input"
 grep -q '\[2/2\] 正在启动 v1.4.0 安装器' "$TMP/tty-input"
 test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = install
 test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/install-choice"
+test "$(cut -d'|' -f3 "$TMP/bootstrap.log")" = none
 
-printf '%s\n' 1 "$TMP/install-choice" >"$TMP/tty-input"
+printf '%s\n' 1 "$TMP/install-choice" 2 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/progress.log"
 set +e
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_CURL_FAIL=1 \
@@ -305,7 +312,27 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 assert_forward v1.4.0 \
-	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+  'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+
+mkdir -p "$TMP/fuse-parent"
+printf '%s\n' 1 "$TMP/install-choice" 1 relative/path >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log"
+set +e
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+  XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+  XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null 2>&1
+fuse_status=$?
+set -e
+test "$fuse_status" -ne 0
+test ! -e "$TMP/bootstrap.log"
+printf '%s\n' 1 "$TMP/install-choice" 1 "$TMP/fuse-parent/media" >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log"
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_INTERNAL_FUSE_PROMPT=1 \
+  XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+  XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+test "$(cut -d'|' -f3 "$TMP/bootstrap.log")" = host-media
+test "$(cut -d'|' -f6 "$TMP/bootstrap.log")" = "$TMP/fuse-parent/media"
+test "$(wc -l <"$TMP/bootstrap.log")" -eq 1
 
 grep -q 'XYMEDIA_FUSE_MODE=host-media' "$ROOT/docs/USAGE.md"
 if grep -Eq 'XYMEDIA_FUSE_MODE=host([[:space:]`]|$)' "$ROOT/README.md" "$ROOT/docs/USAGE.md"; then

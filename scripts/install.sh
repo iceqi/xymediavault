@@ -5,7 +5,7 @@ default_release=v1.4.0
 release=${XYMEDIA_RELEASE:-$default_release}
 component_updater_url='https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
 migration_url='https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
-reset_url='https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
+reset_url='https://raw.githubusercontent.com/iceqi/xymediavault/bf0703b39160ad369ca3b82d59c37d3f719ebe61/scripts/reset-fresh-install.sh'
 interactive=0
 
 error() {
@@ -102,6 +102,29 @@ $(LC_ALL=C locale -a 2>/dev/null)
 EOF
 	fi
 	[ -n "$selected_locale" ] || error '系统缺少 UTF-8 locale，无法安全处理中文路径。'
+}
+
+select_fuse_mode() {
+	menu_print '选择媒体挂载方式：1) 宿主机媒体 FUSE 挂载 2) 不挂载 [2]：'
+	IFS= read -r fuse_choice <&3 || fuse_choice=
+	case "$fuse_choice" in
+	'') fuse_mode=none; return 0;;
+	2) fuse_mode=none; return 0;;
+	1)
+		menu_print '宿主机媒体 FUSE 挂载绝对路径：'
+		IFS= read -r fuse_host_path <&3 || fuse_host_path=
+		validate_path_text "$fuse_host_path"
+		[ "$fuse_host_path" != / ] || error 'FUSE 挂载路径不允许使用根目录。'
+		fuse_parent=$(dirname -- "$fuse_host_path")
+		if [ ! -d "$fuse_parent" ] || [ -L "$fuse_parent" ]; then
+			error 'FUSE 挂载路径的父目录必须存在且不能是符号链接。'
+		fi
+		select_utf8_locale "$fuse_host_path"
+		fuse_mode=host-media
+		return 0
+		;;
+	*) error '请输入 1 或 2。';;
+	esac
 }
 
 tty=${XYMEDIA_TEST_TTY:-/dev/tty}
@@ -267,6 +290,8 @@ run_fresh_reset() {
 			status_print "[0/2] 已确认安装目录：$install_dir"
 			validate_path_text "$install_dir"
 			select_utf8_locale "$install_dir"
+			select_fuse_mode
+			if [ "$fuse_mode" = none ]; then status_print '[0/2] 已确认媒体挂载方式：不挂载'; else status_print "[0/2] 已确认媒体挂载方式：$fuse_host_path"; fi
 			menu_install=1
 			break
 			;;
@@ -303,6 +328,8 @@ run_fresh_reset() {
 			fi
 			status_print "[0/2] 已确认 Compose 项目名：$project"
 			run_fresh_reset "$install_dir" "$project" || exit $?
+			select_fuse_mode
+			if [ "$fuse_mode" = none ]; then status_print '[0/2] 已确认媒体挂载方式：不挂载'; else status_print "[0/2] 已确认媒体挂载方式：$fuse_host_path"; fi
 			menu_install=1
 			break
 			;;
@@ -325,6 +352,7 @@ if [ "$interactive" -eq 1 ] && [ "${menu_install:-0}" -eq 1 ]; then
 		error "无法下载 $release Release bootstrap（使用${download_mode}，目标：$asset）。请设置 XYMEDIA_DOWNLOAD_PROXY='' 可直连重试。"
 	fi
 	status_print "[2/2] 正在启动 $release 安装器；该 Release bootstrap 将继续校验并下载安装器。"
+	status_print 'v1.4.0 安装器将下载并校验 12 个 Release 资产；下载过程受网络影响，请等待或使用 Ctrl-C 取消。'
 else
 	status_print "正在下载 $release 安装引导脚本（使用${download_mode}）。"
 	if ! curl --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 1 -fsSL "$asset" -o "$tmp"; then
@@ -340,8 +368,20 @@ if [ "${compose_only:-0}" -eq 1 ]; then
 	fi
 else
 	if [ -n "${bootstrap_env:-}" ]; then
-		if [ "${menu_install:-0}" -eq 1 ]; then env LC_ALL="$selected_locale" LANG="$selected_locale" XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" sh "$tmp" "$release"; else env LC_ALL="$selected_locale" LANG="$selected_locale" sh "$tmp" "$release"; fi
+		if [ "${menu_install:-0}" -eq 1 ]; then
+			if [ "$fuse_mode" = host-media ]; then
+				env LC_ALL="$selected_locale" LANG="$selected_locale" XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" XYMEDIA_FUSE_MODE=host-media XYMEDIA_FUSE_HOST_PATH="$fuse_host_path" sh "$tmp" "$release"
+			else
+				env LC_ALL="$selected_locale" LANG="$selected_locale" XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" XYMEDIA_FUSE_MODE=none sh "$tmp" "$release"
+			fi
+		else env LC_ALL="$selected_locale" LANG="$selected_locale" sh "$tmp" "$release"; fi
 	else
-		if [ "${menu_install:-0}" -eq 1 ]; then XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" sh "$tmp" "$release"; else sh "$tmp" "$release"; fi
+		if [ "${menu_install:-0}" -eq 1 ]; then
+			if [ "$fuse_mode" = host-media ]; then
+				XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" XYMEDIA_FUSE_MODE=host-media XYMEDIA_FUSE_HOST_PATH="$fuse_host_path" sh "$tmp" "$release"
+			else
+				XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" XYMEDIA_FUSE_MODE=none sh "$tmp" "$release"
+			fi
+		else sh "$tmp" "$release"; fi
 	fi
 fi
