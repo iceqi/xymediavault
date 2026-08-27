@@ -24,7 +24,7 @@ case "$url" in
   https://raw.githubusercontent.com/iceqi/xymediavault/*/scripts/update-components.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_UPDATER_LOG"' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
   *)
-    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s\\n" "$1" "$XYMEDIA_FUSE_MODE" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
+    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s\\n" "$1" "$XYMEDIA_COMMAND" "$XYMEDIA_FUSE_MODE" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
 esac
 EOF
 cat >"$TMP/bin/mktemp" <<'EOF'
@@ -47,13 +47,24 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_DOWNLOAD_PROXY \
 assert_forward v1.4.0 \
 	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 
-printf '%s\n' 3 >"$TMP/tty-input"
+printf '%s\n' 4 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test ! -e "$TMP/url.log"
+test ! -e "$TMP/updater.log"
+
+printf '%s\n' 3 >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/updater.log"
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+assert_forward v1.4.0 \
+	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = 'compose-only'
 test ! -e "$TMP/updater.log"
 
 printf '%s\n' 2 1 '' y >"$TMP/tty-input"
@@ -68,7 +79,7 @@ test "$(sed -n '1p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --compone
 test "$(sed -n '2p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component title --yes'
 if grep -q '/main/scripts/update-components.sh' "$TMP/url.log"; then exit 1; fi
 
-printf '%s\n' 2 4 3 >"$TMP/tty-input"
+printf '%s\n' 2 4 4 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
@@ -86,13 +97,14 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 test "$(sed -n '1p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component tmm --dry-run'
 test "$(wc -l <"$TMP/updater.log")" -eq 1
 
-printf '%s\n' bad 3 >"$TMP/tty-input"
+printf '%s\n' bad 4 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >"$TMP/menu.out" 2>&1
 test "$(grep -Fc '请选择 [1]：' "$TMP/menu.out")" -eq 2
+test "$(grep -Fc '请输入 1、2、3 或 4。' "$TMP/menu.out")" -ge 1
 test ! -e "$TMP/url.log"
 
 printf '%s\n' 1 >"$TMP/tty-input"

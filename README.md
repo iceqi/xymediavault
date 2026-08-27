@@ -6,7 +6,7 @@ XyMediaVault 面向小雅 Alist、Emby、Jellyfin、Infuse 和 TVBox，提供媒
 
 ## v1.4.0 快速安装
 
-生产环境在交互式终端中使用公开安装入口，可选择安装/升级应用或更新 Title/TMM 组件：
+生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 退出：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -22,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh -s -- v1.4.0
 ```
 
-菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。菜单使用固定到 `21e99c95df0c800079fff327c5fcf78b05734612` 的公开更新器（[固定脚本](https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh)），组件 Release 仍由更新器内置锁和 SHA-256 校验保护。
+菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或修改容器，也不创建或修改 FUSE 状态。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移需显式运行迁移脚本，不会由更新器自动触发。
 
 安装器会下载固定 Release 的 `bootstrap.sh`，再由 Release 安装器完成配置和部署。默认安装不启用 FUSE。交互式安装会显示菜单；非交互式 `install` 必须明确设置 `XYMEDIA_FUSE_MODE`，可选 `none` 或 `host-media`。
 
@@ -137,4 +137,18 @@ sh update-components.sh --install-dir /opt/xymedia --component title --yes
 
 更新前会显示归档和 checksum 下载进度，并完成归档 checksum、zstd/tar 路径、manifest 和 payload 校验；大型 Title 归档会在预检阶段耗时，但只解压一次后批量校验，不会重复扫描归档。`all` 在两者都通过前不会停止应用。脚本只接受 `.env` 中的 `XYMEDIA_APP_CONTAINER`（默认 `xymedia-app`），要求 `/app/components` 是 named Docker volume，并只停止/启动应用容器。替换前的组件归档保存在该 volume 的 `.xymedia-component-backups/` 下。脚本要求本地已有 `alpine:3.22`，不会在维护窗口自动拉取镜像。
 
-脚本不能可靠判断组件自身的业务健康状态；完成后请检查管理后台。bind mount、anonymous volume、非支持架构或没有本地 helper 镜像时会拒绝执行。
+脚本不能可靠判断组件自身的业务健康状态；完成后请检查管理后台。更新器同时支持带精确 Compose 标签的旧 named volume 和迁移后的 `$XYMEDIA_INSTALL_DIR/components` canonical bind mount；不会创建 components 目录。anonymous volume、外部 bind、非支持架构或没有本地 helper 镜像时会拒绝执行。
+
+## 迁移组件存储
+
+v1.4.0 的组件默认位于 Docker named volume。需要宿主机可见目录时，先下载公开迁移脚本并执行 dry-run，再显式确认迁移：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/iceqi/xymediavault/<migration-commit>/scripts/migrate-components-storage.sh \
+  -o migrate-components-storage.sh
+sh migrate-components-storage.sh --install-dir /opt/xymedia --dry-run
+sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
+```
+
+`<migration-commit>` 必须替换为已发布的固定提交，不要使用 `main`。迁移只接受 Compose 管理且标签精确匹配的 `components` volume，目标固定为 `/opt/xymedia/components`（即安装目录下的 `components`）；目标目录使用应用可读写的 `0755`，备份目录使用 `0700`。保留原 named volume、迁移备份和顶层 `components:` 定义，不执行删除。迁移前会验证候选 Compose 配置，失败或复制校验失败时不会停止应用；切换后的应用必须达到 `healthy`，否则会恢复原配置并启动旧 named volume。迁移完成后继续使用组件更新脚本即可。

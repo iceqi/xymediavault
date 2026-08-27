@@ -49,12 +49,17 @@ if ! printf '%s' "$lock" | jq -e "$lock_query" >/dev/null; then die 'lock 文件
 
 # Parse only KEY=value lines, without evaluating .env as shell code.
 app=xymedia-app
+project=xymedia
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
     XYMEDIA_APP_CONTAINER=*) app=${line#*=};;
+    COMPOSE_PROJECT_NAME=*) project=${line#*=};;
   esac
 done < "$install_dir/.env"
 case "$app" in ''|*[!A-Za-z0-9_.-]*) die 'XYMEDIA_APP_CONTAINER 包含非法字符。';; esac
+case "$project" in ''|*[!A-Za-z0-9_.-]*) die 'COMPOSE_PROJECT_NAME 包含非法字符。';; esac
+install_dir=$(cd "$install_dir" && pwd -P)
+components_dir=$install_dir/components
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/xymedia-components.XXXXXX") || die '无法创建临时目录。'
 lock_dir=$install_dir/.install.lock
@@ -66,6 +71,8 @@ stop_attempted=false
 app_was_running=false
 timestamp=''
 volume=''
+storage_type=''
+storage_source=''
 # shellcheck disable=SC2317
 cleanup() {
   rm -rf "$tmp"
@@ -83,8 +90,28 @@ if [ "$dry_run" = false ]; then
   [ -n "$image" ] || die '应用容器没有 image ID。'
   arch=$(docker image inspect "$image" | jq -r '.[0].Architecture // empty')
   case "$arch" in amd64) platform=linux/amd64;; arm64|aarch64) platform=linux/arm64;; *) die "不支持的应用镜像架构：$arch。";; esac
-  volume=$(printf '%s' "$app_json" | jq -r '.[0].Mounts[] | select(.Destination=="/app/components") | if .Type=="volume" and (.Name|type=="string") and (.Name|test("^[A-Za-z0-9][A-Za-z0-9_.-]*$")) then .Name else "INVALID" end' | head -n 1)
-  if [ "$volume" = INVALID ] || [ -z "$volume" ]; then die '/app/components 必须是一个 named Docker volume。'; fi
+  mount_json=$(printf '%s' "$app_json" | jq -c '[.[0].Mounts[] | select(.Destination=="/app/components")] | if length == 1 then .[0] else empty end')
+  [ -n "$mount_json" ] || die '/app/components 必须是受支持的 named volume 或 canonical bind mount。'
+  mount_type=$(printf '%s' "$mount_json" | jq -r '.Type')
+  mount_source=$(printf '%s' "$mount_json" | jq -r '.Source // empty')
+  case "$mount_type" in
+    volume)
+      volume=$(printf '%s' "$mount_json" | jq -r '.Name // empty')
+      case "$volume" in ''|*[!A-Za-z0-9_.-]*) die '/app/components 的 named volume 名称无效。';; esac
+      labels=$(docker volume inspect "$volume") || die "无法检查 named volume $volume。"
+      printf '%s' "$labels" | jq -e --arg p "$project" '.[0].Labels["com.docker.compose.project"] == $p and .[0].Labels["com.docker.compose.volume"] == "components"' >/dev/null || die 'named volume 不是当前 Compose 项目管理的 components volume。'
+      storage_type=volume; storage_source=$volume
+      ;;
+    bind)
+      [ "$mount_source" = "$components_dir" ] || die '/app/components bind mount 不是 canonical 安装目录。'
+      [ -d "$components_dir" ] || die 'canonical components 目录不存在。'
+      if [ ! -f "$install_dir/compose.yaml" ] || [ -L "$install_dir/compose.yaml" ]; then die 'compose.yaml 必须是 regular file 且不能是符号链接。'; fi
+      managed_bind_count=$(awk '$0 == "      - \"${XYMEDIA_INSTALL_DIR}/components:/app/components\"" {n++} END {print n+0}' "$install_dir/compose.yaml")
+      [ "$managed_bind_count" -eq 1 ] || die 'canonical bind mount 未被 compose 唯一精确管理。'
+      storage_type=bind; storage_source=$components_dir
+      ;;
+    *) die '/app/components mount 类型不受支持。';;
+  esac
   docker image inspect alpine:3.22 >/dev/null 2>&1 || die '需要本地已有 alpine:3.22，拒绝在维护窗口拉取镜像。'
 else
   platform=${XYMEDIA_TEST_PLATFORM:-linux/amd64}
@@ -153,7 +180,7 @@ done
 if [ "$yes" != true ]; then printf '%s\n' '未提供 --yes，安全退出；请先使用 --dry-run。' >&2; exit 1; fi
 
 for name in $component; do cp "$tmp/$name.tar.zst" "$tmp/$name.stage"; done
-docker run --rm -v "$volume:/components" -v "$tmp:/stage:ro" --entrypoint /bin/sh alpine:3.22 -c 'set -eu; test -w /components; for f in /stage/*.stage; do sha256sum "$f" >/dev/null; done' || die 'Docker helper 预检失败。'
+docker run --rm --mount "type=$storage_type,src=$storage_source,dst=/components" --mount "type=bind,src=$tmp,dst=/stage,readonly" --entrypoint /bin/sh alpine:3.22 -c 'set -eu; test -w /components; for f in /stage/*.stage; do sha256sum "$f" >/dev/null; done' || die 'Docker helper 预检失败。'
 # Install the recovery trap before the stop attempt. Every variable used by it
 # is initialized above, so an interrupted stop cannot trigger set -u failures.
 rollback() {
@@ -165,18 +192,18 @@ rollback() {
     # shellcheck disable=SC2317
     docker stop "$app" >/dev/null 2>&1 || true
     marker_state='unknown'
-    if [ -n "$timestamp" ] && [ -n "$volume" ]; then
+    if [ -n "$timestamp" ] && [ -n "$storage_source" ]; then
       # The marker check is deliberately read-only. Any helper failure is
       # uncertainty, so restoration remains disabled.
       # shellcheck disable=SC2317
-      if marker_state=$(docker run --rm -v "$volume:/components:ro" --entrypoint /bin/sh alpine:3.22 -c 'if test -f "/components/.xymedia-component-backups/'"$timestamp"'/mutation-started"; then printf marker-present; else printf marker-absent; fi'); then :; else marker_state='unknown'; fi
+      if marker_state=$(docker run --rm --mount type="$storage_type",src="$storage_source",dst=/components,readonly --entrypoint /bin/sh alpine:3.22 -c 'if test -f "/components/.xymedia-component-backups/'"$timestamp"'/mutation-started"; then printf marker-present; else printf marker-absent; fi'); then :; else marker_state='unknown'; fi
     fi
     # The durable marker, rather than host booleans, is the source of truth.
     # shellcheck disable=SC2317
     if [ "$marker_state" = marker-present ]; then
       if [ "$mutation_started" = false ] || [ "$changed" = false ]; then printf '%s\n' '[xymedia] 警告：volume marker 表明已开始替换，按 marker 执行恢复。' >&2; fi
       # shellcheck disable=SC2317
-      docker run --rm -v "$volume:/components" --entrypoint /bin/sh alpine:3.22 -c 'set -eu; for n in '"$component"'; do if test -f "/components/.xymedia-component-backups/'"$timestamp"'/$n.prior"; then cp "/components/.xymedia-component-backups/'"$timestamp"'/$n.tar.zst" "/components/$n.tar.zst"; elif test -f "/components/.xymedia-component-backups/'"$timestamp"'/$n.absent"; then rm -f "/components/$n.tar.zst"; fi; done' || true
+      docker run --rm --mount type="$storage_type",src="$storage_source",dst=/components --entrypoint /bin/sh alpine:3.22 -c 'set -eu; for n in '"$component"'; do if test -f "/components/.xymedia-component-backups/'"$timestamp"'/$n.prior"; then cp "/components/.xymedia-component-backups/'"$timestamp"'/$n.tar.zst" "/components/$n.tar.zst"; elif test -f "/components/.xymedia-component-backups/'"$timestamp"'/$n.absent"; then rm -f "/components/$n.tar.zst"; fi; done' || true
     elif [ "$marker_state" = unknown ]; then
       printf '%s\n' '[xymedia] 警告：无法检查 mutation marker，跳过组件恢复。' >&2
     fi
@@ -192,7 +219,7 @@ timestamp=$(date +%Y%m%d%H%M%S)
 for name in $component; do cp "$tmp/$name.tar.zst" "$tmp/$name.stage"; done
 mutation_started=true
 changed=true
-docker run --rm -v "$volume:/components" -v "$tmp:/stage:ro" --entrypoint /bin/sh alpine:3.22 -c 'set -eu; backup=/components/.xymedia-component-backups/'"$timestamp"'; mkdir -p "$backup"; for f in /stage/*.stage; do n=${f##*/}; n=${n%.stage}; if test -f "/components/$n.tar.zst"; then cp "/components/$n.tar.zst" "$backup/$n.tar.zst"; : > "$backup/$n.prior"; else : > "$backup/$n.absent"; fi; done; : > "$backup/mutation-started"; for f in /stage/*.stage; do n=${f##*/}; n=${n%.stage}; cp "$f" "/components/.$n.tar.zst.tmp"; mv "/components/.$n.tar.zst.tmp" "/components/$n.tar.zst"; done' || die '组件写入失败。'
+docker run --rm --mount "type=$storage_type,src=$storage_source,dst=/components" --mount "type=bind,src=$tmp,dst=/stage,readonly" --entrypoint /bin/sh alpine:3.22 -c 'set -eu; backup=/components/.xymedia-component-backups/'"$timestamp"'; mkdir -p "$backup"; for f in /stage/*.stage; do n=${f##*/}; n=${n%.stage}; if test -f "/components/$n.tar.zst"; then cp "/components/$n.tar.zst" "$backup/$n.tar.zst"; : > "$backup/$n.prior"; else : > "$backup/$n.absent"; fi; done; : > "$backup/mutation-started"; for f in /stage/*.stage; do n=${f##*/}; n=${n%.stage}; cp "$f" "/components/.$n.tar.zst.tmp"; mv "/components/.$n.tar.zst.tmp" "/components/$n.tar.zst"; done' || die '组件写入失败。'
 docker start "$app" >/dev/null || die '无法启动应用容器，已尝试回滚。'
 for i in $(seq 1 180); do
   : "$i"

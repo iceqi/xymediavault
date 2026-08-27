@@ -4,7 +4,7 @@
 
 ## 安装入口
 
-当前稳定版本是 `v1.4.0`。生产环境在交互式终端中使用公开安装入口，可选择安装/升级应用或更新 Title/TMM 组件：
+当前稳定版本是 `v1.4.0`。生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 退出：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -12,9 +12,9 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh
 ```
 
-本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用，或更新 Title/TMM 组件；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
+本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件，或仅生成 Compose 配置；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
 
-组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。菜单使用固定到 `21e99c95df0c800079fff327c5fcf78b05734612` 的公开更新器（[固定脚本](https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh)），组件 Release 仍由更新器内置锁和 SHA-256 校验保护。
+组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移必须由用户显式运行迁移脚本，不会由更新器自动执行。
 
 ## 安装模式
 
@@ -73,6 +73,20 @@ sh scripts/update-components.sh --install-dir /opt/xymedia --component all --yes
 
 默认通过 `https://gh-proxy.org/` 获取公开 [iceqi/xymedia-components Releases](https://github.com/iceqi/xymedia-components/releases) 的固定资产；设置 `XYMEDIA_DOWNLOAD_PROXY=` 可直连 GitHub。非空代理必须为 HTTPS，且仅用于固定 Release URL，不查询 API 或 `latest`，也不能覆盖仓库或 tag。当前精确锁定 Title `title-component-sha-ab7f33d6ede5`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/title-component-sha-ab7f33d6ede5)）和 TMM `tmm-component-sha-a0206a51fd9e`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/tmm-component-sha-a0206a51fd9e)），包括各架构资产及 SHA-256。首次操作应先运行 `--dry-run`，真正写入必须显式提供 `--yes`。
 
-脚本会先显示下载阶段并验证归档，再停止应用；Title 大归档的预检会持续输出阶段信息，并在一次受控解压后批量验证约 5032 个 payload 文件。任何校验失败都不会改变 Docker 状态。它要求 `.env` 中的 `XYMEDIA_APP_CONTAINER`（缺省 `xymedia-app`）、`/app/components` named volume、本地 `alpine:3.22`，并仅重启该应用容器；不支持 bind/anonymous volume。备份位于 volume 的 `.xymedia-component-backups/时间戳/`。应用容器健康检查失败时会尝试恢复选中归档并重启，但脚本无法替代组件业务健康检查，请再检查管理后台。
+脚本会先显示下载阶段并验证归档，再停止应用；Title 大归档的预检会持续输出阶段信息，并在一次受控解压后批量验证约 5032 个 payload 文件。任何校验失败都不会改变 Docker 状态。它要求 `.env` 中的 `XYMEDIA_APP_CONTAINER`（缺省 `xymedia-app`）、本地 `alpine:3.22`，并支持带精确 Compose 标签的旧 named volume或迁移后的 canonical bind mount `$XYMEDIA_INSTALL_DIR/components`；不创建 components 目录。备份位于所选存储的 `.xymedia-component-backups/时间戳/`。应用容器健康检查失败时会尝试恢复选中归档并重启，但脚本无法替代组件业务健康检查，请再检查管理后台。
+
+## 迁移组件存储
+
+组件从 named volume 迁移到宿主机目录必须显式执行，并先进行 dry-run：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/iceqi/xymediavault/<migration-commit>/scripts/migrate-components-storage.sh \
+  -o migrate-components-storage.sh
+sh migrate-components-storage.sh --install-dir /opt/xymedia --dry-run
+sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
+```
+
+将 `<migration-commit>` 替换为已发布的固定提交。脚本只接受当前 Compose 项目管理的 `components` volume，目标固定为安装目录下的 `components`，目标目录为应用可读写的 `0755`，并保留旧 volume、备份和 compose 顶层 `components:` 定义。复制、递归校验或候选 Compose 校验失败时应用保持运行；切换后必须为 `healthy`，否则恢复原 named volume 配置。已迁移实例可继续使用上面的组件更新命令。
 
 Release 资产包括 `bootstrap.sh`、`install.sh`、`compose.yaml`、`compose.fuse.yaml`、`config.yaml`、`manifest-v1.json`、`SHA256SUMS`、`upgrade-from-bundled.sh`、`remount-fuse.sh`、`uninstall.sh`、`recovery.md` 和 `verify-release.sh`。没有 manifest 的 `.sig` 或 `.pem` 资产。安装器验证 SHA256SUMS、manifest 资产哈希及精确 manifest 标签绑定，但不验证 manifest Cosign provenance，也不把 SHA-256 校验称为发布者验证。

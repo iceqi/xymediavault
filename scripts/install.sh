@@ -92,16 +92,16 @@ component_menu() {
 
 if [ "$#" -eq 0 ] && [ "${XYMEDIA_RELEASE+x}" != x ] && [ "${XYMEDIA_COMMAND+x}" != x ] && [ -r "$tty" ] && [ -w "$tty" ] && exec 3<"$tty" 2>/dev/null; then
 	while :; do
-		printf '%s\n' 'XyMediaVault' '1) 安装或升级应用' '2) 更新 Title/TMM 组件' '3) 退出' '请选择 [1]：'
+		printf '%s\n' 'XyMediaVault' '1) 安装或升级应用' '2) 更新 Title/TMM 组件' '3) 仅生成 Compose 配置（不创建容器）' '4) 退出' '请选择 [1]：'
 		IFS= read -r choice <&3 || choice=
 		case "$choice" in
 		1) :;;
 		'') :;;
 		2) component_menu; exit $?;;
-		3) printf '%s\n' '已退出。'; exit 0;;
-		*) printf '%s\n' '请输入 1、2 或 3。' >&2; continue;;
+		3) compose_only=1; break;;
+		4) printf '%s\n' '已退出。'; exit 0;;
+		*) printf '%s\n' '请输入 1、2、3 或 4。' >&2; continue;;
 		esac
-		break
 	done
 fi
 
@@ -120,4 +120,8 @@ if [ -n "${XYMEDIA_DOWNLOAD_PROXY:-}" ]; then
 fi
 
 curl --proto '=https' --tlsv1.2 -fsSL "$asset" -o "$tmp" || error "无法下载 $release Release bootstrap。"
-sh "$tmp" "$release"
+if [ "${compose_only:-0}" -eq 1 ]; then
+	XYMEDIA_COMMAND=compose-only sh "$tmp" "$release"
+else
+	sh "$tmp" "$release"
+fi

@@ -61,6 +61,7 @@ fi
 case "$1:$2" in
   inspect:-f) printf '%s\n' running;;
   inspect:*) printf '%s\n' '[{"Image":"img","State":{"Running":true},"Mounts":[{"Destination":"/app/components","Type":"volume","Name":"components"}]}]';;
+  volume:inspect) printf '%s\n' '[{"Name":"components","Labels":{"com.docker.compose.project":"xymedia","com.docker.compose.volume":"components"}}]';;
   image:*) printf '%s\n' '[{"Architecture":"amd64"}]';;
 esac
 if [ "${XYMEDIA_FAIL_STOP:-false}" = true ] && [ "$1" = stop ]; then exit 1; fi
