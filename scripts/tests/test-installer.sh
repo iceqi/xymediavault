@@ -1,196 +1,106 @@
 #!/usr/bin/env sh
 set -eu
-ROOT=$(
-	unset CDPATH
-	cd -- "$(dirname -- "$0")/../.." && pwd -P
-)
-INSTALL="$ROOT/scripts/install.sh"
+
+ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd -P)
+INSTALL=$ROOT/scripts/install.sh
 TMP=${TMPDIR:-/tmp}/xymedia-installer-test.$$
-mkdir -p "$TMP/bin" "$TMP/vault"
+mkdir -p "$TMP/bin"
 trap 'rm -rf "$TMP"' 0 HUP INT TERM
-cat >"$TMP/bin/docker" <<'EOF'
-#!/usr/bin/env sh
-case "$1" in
-  info) exit 0;;
-  version) printf 'amd64\n';;
-  compose) [ "${2:-}" = version ] && printf 'Docker Compose version v2\n' || exit 0;;
-  container) [ "${2:-}" = inspect ] && exit 1;;
-  inspect) exit 1;;
-  *) exit 0;;
-esac
-EOF
-chmod +x "$TMP/bin/docker"
-PATH="$TMP/bin:$PATH"
-cat >"$TMP/fake-legacy.sh" <<'EOF'
+
+cat >"$TMP/bin/curl" <<'EOF'
 #!/usr/bin/env sh
 set -eu
-printf '%s|%s|%s\n' "$IMAGE" "${1:-}" "${XYMEDIA_NON_INTERACTIVE:-}" >"$FAKE_LEGACY_LOG"
-mkdir -p "$1/data" "$1/components"
-printf 'services:\n  xymediavault:\n    image: %s\n    environment:\n      XYMEDIA_COMPONENT_RUNTIME: "local"\n    ports:\n      - "19080:8080"\n      - "19081:8081"\n      - "19082:8082"\n    volumes:\n      - ./data:/app/data\n      - ./tmm:/app/tmm\n      - ./components:/app/components\n      - ./mnt:/mnt/xymediavault\n  xiaoya-alist:\n    image: xiaoyaliu/alist:latest\n    ports:\n      - "15678:80"\n      - "12345:2345"\n      - "12346:2346"\n    volumes:\n      - ./xiaoya:/data\n' "$IMAGE" >"$1/docker-compose.yml"
-printf 'services:\n  xymediavault:\n    devices:\n      - /dev/fuse:/dev/fuse\n    cap_add:\n      - SYS_ADMIN\n    security_opt:\n      - apparmor:unconfined\n' >"$1/docker-compose.fuse.yml"
-EOF
-chmod +x "$TMP/fake-legacy.sh"
-test "$($INSTALL help | grep -c 'vault install')" -eq 1
-grep -q 'driver: postgres' "$ROOT/scripts/legacy-install.sh"
-grep -q 'password_file: /app/data/postgres-secrets/app-password' "$ROOT/scripts/legacy-install.sh"
-grep -q 'reject_legacy_sqlite' "$ROOT/scripts/legacy-install.sh"
-! grep -q 'driver: sqlite' "$ROOT/scripts/legacy-install.sh"
-! grep -q 'linux/arm/v7' "$ROOT/scripts/lib/common.sh"
-grep -q 'ref=${XYMEDIA_INSTALLER_REF:-main}' "$ROOT/scripts/install.sh"
-set +e
-printf '' | "$INSTALL" >/dev/null 2>&1
-test $? -eq 2
-set -e
-set +e
-"$INSTALL" vault install --channel beta --dir "$TMP/nontty" >/dev/null 2>&1
-test $? -eq 2
-set -e
-# shellcheck disable=SC1091
-test "$(
-	. "$ROOT/scripts/lib/common.sh"
-	channel_image stable vault
-)" = iceqi/xymediavault:latest
-# shellcheck disable=SC1091
-FAKE_LEGACY_LOG="$TMP/legacy.log" XYMEDIA_LEGACY_INSTALLER="$TMP/fake-legacy.sh" "$INSTALL" vault install --channel beta --dir "$TMP/vault" --non-interactive >/dev/null
-test "$(cut -d'|' -f1 "$TMP/legacy.log")" = iceqi/xymediavault:beta
-grep -q 'xiaoya-alist' "$TMP/vault/docker-compose.yml"
-grep -q './components:/app/components' "$TMP/vault/docker-compose.yml"
-test -d "$TMP/vault/components"
-test "$(cat "$TMP/vault/.xymedia-channel")" = beta
-mkdir "$TMP/menu"
-(cd "$TMP/menu" && timeout 20 script -qec "printf '1\\n\\n0\\n' | env FAKE_LEGACY_LOG='$TMP/menu.log' XYMEDIA_LEGACY_INSTALLER='$TMP/fake-legacy.sh' $INSTALL menu" /dev/null)
-test -s "$TMP/menu.log"
-test "$(cut -d'|' -f1 "$TMP/menu.log")" = iceqi/xymediavault:latest
-test "$(cut -d'|' -f3 "$TMP/menu.log")" = false
-lock="$TMP/lock"
-mkdir "$lock"
-printf '%s\n' "$$" >"$lock/pid"
-if XYMEDIA_LOCK_DIR="$lock" "$INSTALL" status >/dev/null 2>&1; then :; fi
-rm -rf "$lock"
-mkdir "$lock"
-printf '999999\n' >"$lock/pid"
-XYMEDIA_LOCK_DIR="$lock" XYMEDIA_LEGACY_INSTALLER="$TMP/fake-legacy.sh" FAKE_LEGACY_LOG="$TMP/legacy.log" "$INSTALL" vault install --channel stable --dir "$TMP/vault2" --non-interactive >/dev/null 2>&1 || true
-test -f "$TMP/vault2/docker-compose.yml"
-XYMEDIA_INSTALL_DIR="$TMP/vault" "$INSTALL" status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["vault"]'
-set +e
-"$INSTALL" vault install --channel stable --dir "$TMP/vault" --non-interactive >/dev/null 2>&1
-test $? -ne 0
-set -e
-
-# Exercise the real legacy-install existing-install AWK rewrite path.
-REAL_TMP="$TMP/real-upgrade"
-REAL_BIN="$REAL_TMP/bin"
-REAL_INSTALL="$REAL_TMP/install"
-mkdir -p "$REAL_BIN" "$REAL_INSTALL/data" "$REAL_INSTALL/components" "$REAL_INSTALL/tmm/data"
-cat >"$REAL_INSTALL/docker-compose.yml" <<'EOF'
-services:
-  xymediavault:
-    image: iceqi/xymediavault:old
-    environment:
-      KEEP_EXISTING: "yes"
-      XYMEDIA_COMPONENT_RUNTIME: "local"
-    ports:
-      - "19080:8080"
-      - "19081:8081"
-      - "19082:8082"
-      - type: bind
-        source: ./components
-        target: /app/components
-      - ./tmm:/app/tmm
-EOF
-printf 'legacy component override\n' >"$REAL_INSTALL/components/title.tar.zst"
-cat >"$REAL_BIN/docker" <<'EOF'
-#!/usr/bin/env sh
-set -eu
-printf '%s\n' "$*" >>"$REAL_DOCKER_LOG"
-case "$1" in
-  info) exit 0;;
-  version) printf 'amd64\n'; exit 0;;
-  context|ps|inspect) exit 0;;
-  compose)
-    [ "${2:-}" = version ] && printf 'Docker Compose version v2\n'
-    exit 0
-    ;;
-  container)
-    [ "${2:-}" = inspect ] && exit 0
-    exit 0
-    ;;
-  *)
-    case "$*" in
-      *xymediavault-tmm*|*xymedia-title-standalone*)
-        case "$1" in stop|start|restart|rm|remove|create) exit 99;; esac
-        ;;
-    esac
-    exit 0
-    ;;
-esac
-EOF
-chmod +x "$REAL_BIN/docker"
-REAL_DOCKER_LOG="$REAL_TMP/docker.log" PATH="$REAL_BIN:$PATH" XYMEDIA_NON_INTERACTIVE=true XYMEDIA_ASSUME_YES=true FUSE_DEVICE_PATH="$REAL_TMP/missing-fuse" sh "$ROOT/scripts/legacy-install.sh" "$REAL_INSTALL" >/dev/null
-grep -q 'KEEP_EXISTING: "yes"' "$REAL_INSTALL/docker-compose.yml"
-grep -q 'target: /app/components' "$REAL_INSTALL/docker-compose.yml"
-grep -q './tmm:/app/tmm' "$REAL_INSTALL/docker-compose.yml"
-test -f "$REAL_INSTALL/components/title.tar.zst"
-! grep -Eq '(stop|start|restart|rm|remove|create).*(xymediavault-tmm|xymedia-title-standalone)' "$REAL_TMP/docker.log"
-
-REAL_LONG="$TMP/real-upgrade-long"
-mkdir -p "$REAL_LONG/data" "$REAL_LONG/components" "$REAL_LONG/tmm/data"
-cat >"$REAL_LONG/docker-compose.yml" <<'EOF'
-services:
-  xymediavault:
-    image: iceqi/xymediavault:old
-    environment:
-      KEEP_LONG: "yes"
-    ports:
-      - "19080:8080"
-      - "19081:8081"
-      - "19082:8082"
-    volumes:
-      - type: bind
-        source: ./components
-        target: /app/components
-      - type: bind
-        source: ./tmm
-        target: /app/tmm
-EOF
-REAL_DOCKER_LOG="$REAL_TMP/docker-long.log" PATH="$REAL_BIN:$PATH" XYMEDIA_NON_INTERACTIVE=true XYMEDIA_ASSUME_YES=true FUSE_DEVICE_PATH="$REAL_TMP/missing-fuse" sh "$ROOT/scripts/legacy-install.sh" "$REAL_LONG" >/dev/null
-grep -q 'target: /app/components' "$REAL_LONG/docker-compose.yml"
-grep -q 'target: /app/tmm' "$REAL_LONG/docker-compose.yml"
-grep -q 'KEEP_LONG: "yes"' "$REAL_LONG/docker-compose.yml"
-
-BOOTSTRAP_INPUT="$TMP/bootstrap-input.sh"
-BOOTSTRAP_ARCHIVE="$TMP/bootstrap.tar.gz"
-cp "$INSTALL" "$BOOTSTRAP_INPUT"
-tar -czf "$BOOTSTRAP_ARCHIVE" -C "$ROOT" --transform='s,^,xymediavault-beta/,' scripts/install.sh scripts/legacy-install.sh scripts/lib
-test "$(XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" help | grep -c 'vault install')" -eq 1
-mkdir "$TMP/bootstrap-bin"
-cat >"$TMP/bootstrap-bin/curl" <<'EOF'
-#!/usr/bin/env sh
-set -eu
-destination=
 url=
+destination=
 while [ "$#" -gt 0 ]; do
-	case "$1" in
-	-o)
-		destination=$2
-		shift 2
-		;;
-	https://*) url=$1; shift ;;
-	*) shift ;;
-	esac
+  case "$1" in
+    -o) destination=$2; shift 2;;
+    https://*) url=$1; shift;;
+    *) shift;;
+  esac
 done
-printf '%s\n' "$url" >"$BOOTSTRAP_URL_LOG"
-cp "$BOOTSTRAP_ARCHIVE_SOURCE" "$destination"
+printf '%s\n' "$url" >"$XYMEDIA_TEST_URL_LOG"
+printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s\\n" "$1" "$XYMEDIA_FUSE_MODE" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination"
 EOF
-chmod +x "$TMP/bootstrap-bin/curl"
-test "$(PATH="$TMP/bootstrap-bin:$PATH" BOOTSTRAP_URL_LOG="$TMP/bootstrap-url.log" BOOTSTRAP_ARCHIVE_SOURCE="$BOOTSTRAP_ARCHIVE" XYMEDIA_INSTALLER_TESTING=1 sh "$BOOTSTRAP_INPUT" help | grep -c 'vault install')" -eq 1
-test "$(cat "$TMP/bootstrap-url.log")" = 'https://gh-proxy.org/https://codeload.github.com/iceqi/xymediavault/tar.gz/refs/heads/main'
+cat >"$TMP/bin/mktemp" <<'EOF'
+#!/usr/bin/env sh
+printf '%s/bootstrap.sh\n' "$XYMEDIA_TEST_TMP"
+EOF
+chmod +x "$TMP/bin/curl" "$TMP/bin/mktemp"
+
+assert_forward() {
+	expected_release=$1
+	expected_url=$2
+	test "$(tr -d '\n' <"$TMP/url.log")" = "$expected_url"
+	test "$(cut -d'|' -f1 "$TMP/bootstrap.log")" = "$expected_release"
+	test ! -e "$TMP/bootstrap.sh"
+}
+
+env -u XYMEDIA_RELEASE -u XYMEDIA_DOWNLOAD_PROXY \
+	XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+assert_forward v1.4.0 \
+	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+
+grep -q 'XYMEDIA_FUSE_MODE=host-media' "$ROOT/docs/USAGE.md"
+if grep -Eq 'XYMEDIA_FUSE_MODE=host([[:space:]`]|$)' "$ROOT/README.md" "$ROOT/docs/USAGE.md"; then
+	exit 1
+fi
+compose_only_block=$(awk '
+  /^```/ {
+    if (in_fence) {
+      if (block ~ /XYMEDIA_COMMAND=compose-only/) {
+        printf "%s", block
+        exit
+      }
+      in_fence=0
+      block=""
+    } else {
+      in_fence=1
+    }
+    next
+  }
+  in_fence {
+    block = block $0 "\n"
+  }
+' "$ROOT/README.md")
+test -n "$compose_only_block"
+printf '%s\n' "$compose_only_block" | grep -q 'XYMEDIA_COMMAND=compose-only'
+if printf '%s\n' "$compose_only_block" | grep -q 'XYMEDIA_FUSE_MODE='; then
+	exit 1
+fi
+
+env -u XYMEDIA_DOWNLOAD_PROXY XYMEDIA_RELEASE=v1.4.1 \
+	XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+assert_forward v1.4.1 \
+	'https://github.com/iceqi/xymediavault/releases/download/v1.4.1/bootstrap.sh'
+
+env -u XYMEDIA_RELEASE -u XYMEDIA_DOWNLOAD_PROXY \
+	XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" v1.4.2 >/dev/null
+assert_forward v1.4.2 \
+	'https://github.com/iceqi/xymediavault/releases/download/v1.4.2/bootstrap.sh'
+
+XYMEDIA_RELEASE=v1.4.1 XYMEDIA_DOWNLOAD_PROXY='' \
+	XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" v1.4.2 >/dev/null
+assert_forward v1.4.2 \
+	'https://github.com/iceqi/xymediavault/releases/download/v1.4.2/bootstrap.sh'
+
+env -u XYMEDIA_RELEASE XYMEDIA_DOWNLOAD_PROXY=https://proxy.example/ \
+	XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" v1.4.1 >/dev/null
+assert_forward v1.4.1 \
+	'https://proxy.example/https://github.com/iceqi/xymediavault/releases/download/v1.4.1/bootstrap.sh'
+
 set +e
-printf '' | XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" >/dev/null 2>&1
+PATH="$TMP/bin:$PATH" "$INSTALL" v1.4 >/dev/null 2>&1
+test $? -eq 2
+XYMEDIA_SKIP_SIGNATURE_VERIFY=1 PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null 2>&1
+test $? -eq 2
+"$INSTALL" v1.4.0 extra >/dev/null 2>&1
 test $? -eq 2
 set -e
-set +e
-XYMEDIA_INSTALLER_REF='../unsafe' XYMEDIA_INSTALLER_TESTING=1 XYMEDIA_INSTALLER_ARCHIVE_URL="file://$BOOTSTRAP_ARCHIVE" sh "$BOOTSTRAP_INPUT" help >/dev/null 2>&1
-test $? -eq 1
-set -e
+
 printf '%s\n' 'installer tests: PASS'

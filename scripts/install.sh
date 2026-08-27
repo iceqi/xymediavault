@@ -1,235 +1,65 @@
 #!/usr/bin/env sh
 set -eu
 
-SCRIPT_DIR=$(
-	unset CDPATH
-	cd -- "$(dirname -- "$0")" && pwd -P
-)
-LIB_DIR="$SCRIPT_DIR/lib"
-BOOTSTRAP_TMP=
-bootstrap_cleanup() {
-	[ -n "${BOOTSTRAP_TMP:-}" ] && rm -rf "$BOOTSTRAP_TMP"
-}
-bootstrap_error() {
-	printf '[xymedia] ERROR: %s\n' "$1" >&2
-	exit 1
-}
-bootstrap_bundle() {
-	ref=${XYMEDIA_INSTALLER_REF:-main}
-	repo=${XYMEDIA_INSTALLER_REPO:-iceqi/xymediavault}
-	case "$ref" in
-	'' | -* | *..* | *[!A-Za-z0-9._/-]*) bootstrap_error '无效的 installer ref。' ;;
-	esac
-	case "$repo" in
-	[A-Za-z0-9._-]*/[A-Za-z0-9._-]*) ;;
-	*) bootstrap_error '无效的 installer repo。' ;;
-	esac
-	command -v curl >/dev/null 2>&1 || bootstrap_error 'bootstrap 需要 curl。'
-	command -v tar >/dev/null 2>&1 || bootstrap_error 'bootstrap 需要 tar。'
-	BOOTSTRAP_TMP=$(mktemp -d "${TMPDIR:-/tmp}/xymedia-installer.XXXXXX") || bootstrap_error '无法创建临时目录。'
-	trap 'bootstrap_cleanup' 0 HUP INT TERM
-	archive="$BOOTSTRAP_TMP/bundle.tar.gz"
-	if [ -n "${XYMEDIA_INSTALLER_ARCHIVE_URL:-}" ]; then
-		url=$XYMEDIA_INSTALLER_ARCHIVE_URL
-		if [ "${XYMEDIA_INSTALLER_TESTING:-0}" != 1 ]; then
-			case "$url" in https://*) ;; *) bootstrap_error '生产环境 archive URL 必须使用 HTTPS。' ;; esac
-		fi
-	else
-		base=https://codeload.github.com
-		proxy=${XYMEDIA_GITHUB_PROXY:-https://gh-proxy.org/}
-		if [ -n "$proxy" ]; then
-			proxy=${proxy%/}/
-			base=${proxy}https://codeload.github.com
-		fi
-		url="$base/$repo/tar.gz/refs/heads/$ref"
-	fi
-	if [ "${XYMEDIA_INSTALLER_TESTING:-0}" = 1 ]; then
-		curl -fL --retry 3 --connect-timeout 15 --max-time 300 "$url" -o "$archive" || bootstrap_error '无法下载 installer bundle。'
-	else
-		curl --proto '=https' --tlsv1.2 -fL --retry 3 --connect-timeout 15 --max-time 300 "$url" -o "$archive" || bootstrap_error '无法下载 installer bundle。'
-	fi
-	size=$(wc -c <"$archive")
-	case "$size" in '' | *[!0-9]*) bootstrap_error '无法检查 bundle 大小。' ;; esac
-	[ "$size" -ge 1024 ] && [ "$size" -le 5242880 ] || bootstrap_error 'bundle 大小不在允许范围内。'
-	prefix=
-	while IFS= read -r entry; do
-		case "$entry" in
-		/* | ../* | */../* | *'/..') bootstrap_error 'bundle 包含不安全路径。' ;;
-		esac
-		case "$entry" in
-		xymediavault-*)
-			entry_prefix=${entry%%/*}
-			[ -n "$prefix" ] || prefix=$entry_prefix
-			[ "$entry_prefix" = "$prefix" ] || bootstrap_error 'bundle 包含多个顶层目录。'
-			;;
-		'') ;;
-		*) bootstrap_error 'bundle 包含错误的顶层目录。' ;;
-		esac
-	done <<EOF
-$(tar -tzf "$archive")
-EOF
-	[ -n "$prefix" ] || bootstrap_error 'bundle 为空。'
-	case "$prefix" in xymediavault-*) ;; *) bootstrap_error 'bundle 顶层目录无效。' ;; esac
-	while IFS= read -r detail; do
-		case "$detail" in
-		l* | h* | *' -> '* | *' link to '*) bootstrap_error 'bundle 不允许符号链接或硬链接。' ;;
-		esac
-	done <<EOF
-$(tar -tvzf "$archive")
-EOF
-	repo_dir="$BOOTSTRAP_TMP/repo"
-	mkdir "$repo_dir"
-	tar -xzf "$archive" -C "$repo_dir" --strip-components=1 || bootstrap_error '无法提取 installer bundle。'
-	for required in scripts/install.sh scripts/legacy-install.sh scripts/lib/common.sh scripts/lib/vault.sh; do
-		[ -f "$repo_dir/$required" ] && [ ! -L "$repo_dir/$required" ] || bootstrap_error "bundle 缺少或链接化文件：$required。"
-	done
-	chmod +x "$repo_dir/scripts/install.sh" "$repo_dir/scripts/legacy-install.sh"
-	export XYMEDIA_INSTALLER_BOOTSTRAPPED=1
-	child=$repo_dir/scripts/install.sh
-	if [ "$#" -eq 0 ]; then
-		if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-			sh "$child" </dev/tty >/dev/tty 2>/dev/tty
-			status=$?
-		else
-			printf '%s\n' '无参数菜单需要可读写的 /dev/tty；请 clone 完整仓库后执行，或使用带参数的非交互命令。' >&2
-			status=2
-		fi
-	else
-		sh "$child" "$@" </dev/null
-		status=$?
-	fi
-	bootstrap_cleanup
-	trap - 0 HUP INT TERM
-	exit "$status"
+default_release=v1.4.0
+release=${XYMEDIA_RELEASE:-$default_release}
+
+error() {
+	printf '%s\n' "[xymedia] 错误：$1" >&2
+	exit 2
 }
 
-if [ ! -r "$LIB_DIR/common.sh" ] || [ ! -r "$LIB_DIR/vault.sh" ] || [ ! -r "$SCRIPT_DIR/legacy-install.sh" ]; then
-	bootstrap_bundle "$@"
+digits_only() {
+	case "$1" in
+	'' | *[!0-9]*) return 1 ;;
+	esac
+}
+
+valid_release() {
+	tag=$1
+	case "$tag" in
+	v*.*.*-beta.*)
+		base=${tag%-beta.*}
+		beta=${tag#*-beta.}
+		digits_only "$beta" || return 1
+		;;
+	v*.*.*)
+		base=$tag
+		;;
+	*) return 1 ;;
+	esac
+	body=${base#v}
+	major=${body%%.*}
+	rest=${body#*.}
+	minor=${rest%%.*}
+	patch=${rest#*.}
+	[ "$rest" != "$body" ] && [ "$patch" != "$rest" ] || return 1
+	digits_only "$major" && digits_only "$minor" && digits_only "$patch"
+}
+
+[ "$#" -le 1 ] || error '只接受一个可选的 Release 标签参数，例如 v1.4.0。'
+if [ "$#" -eq 1 ]; then
+	release=$1
 fi
-for lib in common.sh vault.sh; do
-	# shellcheck disable=SC1090
-	. "$LIB_DIR/$lib"
-done
+valid_release "$release" || error "无效的 Release 标签：$release（格式应为 vX.Y.Z 或 vX.Y.Z-beta.N）。"
+[ -z "${XYMEDIA_SKIP_SIGNATURE_VERIFY:-}" ] || error 'XYMEDIA_SKIP_SIGNATURE_VERIFY 已废弃且不再支持；请移除该变量。'
 
-installer_help() {
-	cat <<'EOF'
-XyMediaVault unified installer
+command -v curl >/dev/null 2>&1 || error '安装器需要 curl。'
+command -v mktemp >/dev/null 2>&1 || error '安装器需要 mktemp。'
 
-Usage:
-  bash install.sh menu
-  bash install.sh vault install --channel stable|beta [--dir DIR] [--non-interactive]
-  bash install.sh vault check
-  bash install.sh vault upgrade [--channel stable|beta] [--yes]
-  bash install.sh vault switch --channel stable|beta [--yes]
-  bash install.sh env | version | status [--json]
-  bash install.sh uninstall vault [--purge-data] [--yes]
-  bash install.sh help
+tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-bootstrap.XXXXXX") || error '无法创建临时文件。'
+cleanup() { rm -f "$tmp"; }
+trap cleanup 0 HUP INT TERM
 
-Run without arguments only from a TTY to open the numeric menu.
-EOF
-}
+asset="https://github.com/iceqi/xymediavault/releases/download/$release/bootstrap.sh"
+if [ -n "${XYMEDIA_DOWNLOAD_PROXY:-}" ]; then
+	proxy=${XYMEDIA_DOWNLOAD_PROXY%/}
+	case "$proxy" in
+	https://*) ;;
+	*) error '生产环境 XYMEDIA_DOWNLOAD_PROXY 必须使用 HTTPS。' ;;
+	esac
+	asset="$proxy/$asset"
+fi
 
-menu() {
-	export MENU_INTERACTIVE=true
-	while :; do
-		cat <<'EOF'
-
-XyMediaVault 管理菜单
-1) 安装 XyMediaVault 稳定版
-2) 安装 XyMediaVault Beta
-3) 检查/升级 XyMediaVault
-4) 切换 XyMediaVault 版本通道
-5) 环境检测
-6) 当前版本
-7) 服务状态
-8) 卸载/维护
-0) 退出
-EOF
-		printf '请选择：'
-		IFS= read -r choice || return 0
-		case "$choice" in
-		1)
-			vault_install stable
-			pause_menu
-			;;
-		2)
-			vault_install beta
-			pause_menu
-			;;
-		3)
-			vault_check
-			confirm false '升级 Vault 并备份/替换容器。' || continue
-			vault_upgrade --yes
-			pause_menu
-			;;
-		4)
-			vault_switch
-			pause_menu
-			;;
-		5)
-			env_report
-			pause_menu
-			;;
-		6)
-			version_report
-			pause_menu
-			;;
-		7)
-			status_report
-			pause_menu
-			;;
-		8) maintenance_menu ;;
-		0) return 0 ;; *) printf '%s\n' '无效选择，请输入菜单数字。' ;;
-		esac
-	done
-}
-pause_menu() {
-	printf '按回车继续...'
-	IFS= read -r _ || true
-}
-maintenance_menu() {
-	printf '%s\n' '维护：1) 卸载 Vault 0) 返回'
-	printf '请选择：'
-	IFS= read -r c || return 0
-	case "$c" in 1) uninstall_service vault ;; esac
-}
-
-legacy_dispatch() {
-	printf '%s\n' '警告：旧版位置参数安装已弃用，将映射为 vault install。' >&2
-	dir=$1
-	vault_install stable --dir "$dir"
-}
-
-case "${1:-}" in
-'') if is_tty; then menu; else
-	installer_help >&2
-	exit 2
-fi ;;
-menu) menu ;;
-help | -h | --help) installer_help ;;
-env) env_report ;;
-version) version_report ;;
-status)
-	shift
-	status_report "$@"
-	;;
-vault)
-	shift
-	vault_command "$@"
-	;;
-uninstall)
-	shift
-	uninstall_service "$@"
-	;;
--*)
-	printf '%s\n' "未知命令：$1" >&2
-	installer_help >&2
-	exit 2
-	;;
-/* | ./* | ../*) legacy_dispatch "$@" ;;
-*)
-	printf '%s\n' "未知命令：$1" >&2
-	installer_help >&2
-	exit 2
-	;;
-esac
+curl --proto '=https' --tlsv1.2 -fsSL "$asset" -o "$tmp" || error "无法下载 $release Release bootstrap。"
+sh "$tmp" "$release"
