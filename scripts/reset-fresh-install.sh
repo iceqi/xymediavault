@@ -4,11 +4,27 @@ umask 077
 
 error() { printf '%s\n' "[xymedia] 错误：$1" >&2; exit 2; }
 install_dir=
+project=
 tty=${XYMEDIA_TEST_TTY:-/dev/tty}
-if [ "$#" -ne 2 ] || [ "$1" != --install-dir ]; then
-	error '用法：reset-fresh-install.sh --install-dir DIR'
-fi
-install_dir=$2
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--install-dir)
+		[ "$#" -ge 2 ] || error '用法：reset-fresh-install.sh --install-dir ABS_DIR --project PROJECT'
+		[ -z "$install_dir" ] || error '安装目录参数不能重复。'
+		install_dir=$2
+		shift 2
+		;;
+	--project)
+		[ "$#" -ge 2 ] || error '用法：reset-fresh-install.sh --install-dir ABS_DIR --project PROJECT'
+		[ -z "$project" ] || error '项目名参数不能重复。'
+		project=$2
+		shift 2
+		;;
+	*) error '用法：reset-fresh-install.sh --install-dir ABS_DIR --project PROJECT';;
+	esac
+done
+[ -n "$install_dir" ] || error '必须提供安装目录。'
+[ -n "$project" ] || error '必须提供 Compose 项目名。'
 case "$install_dir" in /*) ;; *) error '安装目录必须是绝对路径。';; esac
 [ "$install_dir" != / ] || error '不允许使用根目录作为安装目录。'
 if [ ! -d "$install_dir" ] || [ -L "$install_dir" ]; then
@@ -16,18 +32,19 @@ if [ ! -d "$install_dir" ] || [ -L "$install_dir" ]; then
 fi
 canonical=$(cd -- "$install_dir" && pwd -P)
 [ "$canonical" != / ] || error '不允许使用根目录作为安装目录。'
-if [ ! -f "$install_dir/.env" ] || [ -L "$install_dir/.env" ]; then
-	error '缺少安全的 .env 文件。'
-fi
-if [ ! -f "$install_dir/compose.yaml" ] || [ -L "$install_dir/compose.yaml" ]; then
-	error '缺少安全的 compose.yaml 文件。'
-fi
+[ "$install_dir" = "$canonical" ] || error '安装目录必须是规范化的非符号链接绝对路径。'
 if LC_ALL=C printf '%s' "$install_dir" | LC_ALL=C grep -q '[[:cntrl:]]'; then error '安装目录不能包含 ASCII 控制字符。'; fi
-
-project=$(awk '$0 ~ /^COMPOSE_PROJECT_NAME=/ { count++; value=substr($0, length("COMPOSE_PROJECT_NAME=") + 1) } END { if (count == 1) print value; else exit 1 }' "$install_dir/.env") || error '.env 中 COMPOSE_PROJECT_NAME 必须恰好出现一次。'
 if ! LC_ALL=C printf '%s\n' "$project" | LC_ALL=C grep -Eq '^[a-z0-9][a-z0-9_-]{0,62}$'; then
-	error 'COMPOSE_PROJECT_NAME 格式无效。'
+	error 'Compose 项目名格式无效。'
 fi
+
+# Validate managed paths before any Docker state can be changed.
+for item in .env compose.yaml compose.fuse.yaml config.yaml verify-release.sh releases secrets; do
+	if [ -e "$install_dir/$item" ] || [ -L "$install_dir/$item" ]; then
+		[ ! -L "$install_dir/$item" ] || error "受控备份项不能是符号链接：$item"
+		[ -f "$install_dir/$item" ] || [ -d "$install_dir/$item" ] || error "受控备份项不是普通文件或目录：$item"
+	fi
+done
 command -v docker >/dev/null 2>&1 || error '重置需要 Docker。'
 if [ ! -r "$tty" ] || [ ! -w "$tty" ]; then
 	error '重置必须在可读写的交互式终端中执行。'
@@ -58,6 +75,7 @@ menu_print '该操作将永久删除列出的 Docker 数据。确认继续？[y/
 IFS= read -r answer <&3 || answer=
 case "$answer" in y|Y) ;; *) menu_print '已取消重置。'; exit 0;; esac
 
+menu_print '[1/2] 正在逐项复核并删除 Docker 资源...'
 while IFS="$tab" read -r id name type _status; do
 	[ -n "$id" ] || continue
 	case "$type" in
@@ -80,12 +98,14 @@ while IFS="$tab" read -r id name type _status; do
 	esac
 done <"$resources"
 
+# Move each managed control item only after all Docker deletions succeeded.
+menu_print '[2/2] Docker 资源删除完成，正在备份受控文件...'
 timestamp=$(date +%Y%m%d-%H%M%S) || error '无法生成备份时间戳。'
 backup="$install_dir/.xymedia-reset-backups/$timestamp"
 mkdir -p "$backup"
 chmod 700 "$install_dir/.xymedia-reset-backups" "$backup"
 for item in .env compose.yaml compose.fuse.yaml config.yaml verify-release.sh releases secrets; do
-	if [ -e "$install_dir/$item" ] && [ ! -L "$install_dir/$item" ]; then mv "$install_dir/$item" "$backup/$item" || error "备份文件失败：$item"; fi
+	if [ -e "$install_dir/$item" ]; then mv "$install_dir/$item" "$backup/$item" || error "备份文件失败：$item"; fi
 done
 menu_print "Docker 资源已删除。受控文件已备份到：$backup"
 menu_print 'components、media、xiaoya 及其他宿主机数据未删除。'

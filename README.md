@@ -10,19 +10,21 @@ XyMediaVault 面向小雅 Alist、Emby、Jellyfin、Infuse 和 TVBox，提供媒
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh' \
+  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/817a5e9a571cab4edec35d4735f2f1495ca977d1/scripts/install.sh' \
   | sh
 ```
+
+以上是绑定提交 `817a5e9a571cab4edec35d4735f2f1495ca977d1` 的固定公共安装入口，用于绕过浮动 `/main/` 的缓存。
 
 该入口默认转发到 `v1.4.0`，支持一个明确的 `vX.Y.Z` 或 `vX.Y.Z-beta.N` 参数。显式传入版本、设置 `XYMEDIA_RELEASE`、设置 `XYMEDIA_COMMAND` 或没有可用 TTY 时，会跳过外层菜单并进入固定 Release bootstrap：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh \
+  https://raw.githubusercontent.com/iceqi/xymediavault/817a5e9a571cab4edec35d4735f2f1495ca977d1/scripts/install.sh \
   | sh -s -- v1.4.0
 ```
 
-菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或修改容器，也不创建或修改 FUSE 状态。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。选择 `4` 会下载固定提交中的迁移脚本，只有预检成功并明确确认后才执行 v1.4.0 布局迁移；原 named volume 会保留。选择 `5` 会下载固定提交中的重置脚本，由该脚本完成两次确认并删除精确 Compose 项目的 Docker 数据；只有重置成功后才启动精确的 v1.4.0 全新安装。
+菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或修改容器，也不创建或修改 FUSE 状态。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。选择 `4` 会下载固定提交中的迁移脚本，只有预检成功并明确确认后才执行 v1.4.0 布局迁移；原 named volume 会保留。当前已发布菜单的 reset pin 仍待新 helper 提交完成后更新；更新后的菜单流程才会提示并传入 Compose 项目名，只有重置成功后才启动精确的 v1.4.0 全新安装。
 
 安装器会下载固定 Release 的 `bootstrap.sh`，再由 Release 安装器完成配置和部署。默认安装不启用 FUSE。交互式安装会显示菜单；非交互式 `install` 必须明确设置 `XYMEDIA_FUSE_MODE`，可选 `none` 或 `host-media`。
 
@@ -156,4 +158,4 @@ sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
 迁移只接受 Compose 管理且标签精确匹配的 `components` volume，目标固定为 `/opt/xymedia/components`（即安装目录下的 `components`）；目标目录使用应用可读写的 `0755`，备份目录使用 `0700`。保留原 named volume、迁移备份和顶层 `components:` 定义，不执行删除。迁移前会验证候选 Compose 配置，失败或复制校验失败时不会停止应用；切换后的应用必须达到 `healthy`，否则会恢复原配置并启动旧 named volume。迁移完成后继续使用组件更新脚本即可。
 交互菜单仅在可读写 TTY 中清屏并显示；组件更新和迁移目录提示留空时使用当前工作目录，无法安全规范化时回退 `/opt/xymedia`。长操作显示编号阶段，TTY 使用更新中的一行，非交互和日志使用逐行输出，不保证精确下载百分比。
 
-菜单 `5` 会下载并执行固定 SHA `b42c25467de718575f68230edfb7947f467db915` 的 `scripts/reset-fresh-install.sh`。它要求 `RESET <project>` 与 `y/Y` 两次确认，只处理 `.env` 中精确 `COMPOSE_PROJECT_NAME` 标签对应的容器、named volume 和网络；删除前会备份受控 Release 文件，不删除 `media`、`xiaoya`、`components` 或其他宿主机数据。取消或失败都不会启动 bootstrap；成功后才自动启动精确的 v1.4.0 全新安装。Docker 数据删除不可逆，应用数据删除后无法回滚；宿主机媒体、xiaoya 和 components 保留。
+`scripts/reset-fresh-install.sh` 独立接受 `--install-dir ABS_DIR --project PROJECT`，不读取 `.env` 或任何 Compose YAML。`PROJECT` 必须匹配 ASCII `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单会在后续固定版本中提示项目名，默认传入 `xymedia`。脚本只发现并处理精确标签 `com.docker.compose.project=$PROJECT` 对应的容器、named volume 和网络，删除前逐项复核标签；它不使用 Compose、`down -v`、名称通配或 prune。删除前会列出资源并要求 `RESET <PROJECT>` 与 `y/Y` 两次 TTY 确认，即使没有资源也不会跳过确认。成功后才逐项备份现有 `.env`、Compose 和 Release 控制文件；始终保留 `media`、`xiaoya`、`components` 及其他宿主机数据。该 helper 适用于安装失败导致 `.env` 或 Compose 文件已被回滚/删除的目录。
