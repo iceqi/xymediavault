@@ -71,8 +71,8 @@ sh scripts/update-components.sh --install-dir /opt/xymedia --component tmm --yes
 sh scripts/update-components.sh --install-dir /opt/xymedia --component all --yes
 ```
 
-默认从公开的 [iceqi/xymedia-components Releases](https://github.com/iceqi/xymedia-components/releases) 直接获取固定资产，不查询 API 或 `latest`。当前精确锁定 Title `title-component-sha-ab7f33d6ede5`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/title-component-sha-ab7f33d6ede5)）和 TMM `tmm-component-sha-a0206a51fd9e`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/tmm-component-sha-a0206a51fd9e)），包括各架构资产及 SHA-256。首次操作应先运行 `--dry-run`，真正写入必须显式提供 `--yes`。
+默认通过 `https://gh-proxy.org/` 获取公开 [iceqi/xymedia-components Releases](https://github.com/iceqi/xymedia-components/releases) 的固定资产；设置 `XYMEDIA_DOWNLOAD_PROXY=` 可直连 GitHub。非空代理必须为 HTTPS，且仅用于固定 Release URL，不查询 API 或 `latest`，也不能覆盖仓库或 tag。当前精确锁定 Title `title-component-sha-ab7f33d6ede5`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/title-component-sha-ab7f33d6ede5)）和 TMM `tmm-component-sha-a0206a51fd9e`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/tmm-component-sha-a0206a51fd9e)），包括各架构资产及 SHA-256。首次操作应先运行 `--dry-run`，真正写入必须显式提供 `--yes`。
 
-脚本会先下载并验证两个归档，再停止应用。它要求 `.env` 中的 `XYMEDIA_APP_CONTAINER`（缺省 `xymedia-app`）、`/app/components` named volume、本地 `alpine:3.22`，并仅重启该应用容器；不支持 bind/anonymous volume。备份位于 volume 的 `.xymedia-component-backups/时间戳/`。应用容器健康检查失败时会尝试恢复选中归档并重启，但脚本无法替代组件业务健康检查，请再检查管理后台。
+脚本会先显示下载阶段并验证归档，再停止应用；Title 大归档的预检会持续输出阶段信息，并在一次受控解压后批量验证约 5032 个 payload 文件。任何校验失败都不会改变 Docker 状态。它要求 `.env` 中的 `XYMEDIA_APP_CONTAINER`（缺省 `xymedia-app`）、`/app/components` named volume、本地 `alpine:3.22`，并仅重启该应用容器；不支持 bind/anonymous volume。备份位于 volume 的 `.xymedia-component-backups/时间戳/`。应用容器健康检查失败时会尝试恢复选中归档并重启，但脚本无法替代组件业务健康检查，请再检查管理后台。
 
 Release 资产包括 `bootstrap.sh`、`install.sh`、`compose.yaml`、`compose.fuse.yaml`、`config.yaml`、`manifest-v1.json`、`SHA256SUMS`、`upgrade-from-bundled.sh`、`remount-fuse.sh`、`uninstall.sh`、`recovery.md` 和 `verify-release.sh`。没有 manifest 的 `.sig` 或 `.pem` 资产。安装器验证 SHA256SUMS、manifest 资产哈希及精确 manifest 标签绑定，但不验证 manifest Cosign provenance，也不把 SHA-256 校验称为发布者验证。

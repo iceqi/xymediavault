@@ -15,10 +15,10 @@ out=; url=
 while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift 2;; https://*) url=$1; shift;; -H) printf 'header:%s\n' "$2" >> "$XYMEDIA_TEST_LOG"; shift 2;; *) shift;; esac; done
 printf '%s\n' "$url" >> "$XYMEDIA_TEST_LOG"
 case "$url" in
-  https://github.com/iceqi/xymedia-components/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst) cp "$XYMEDIA_TEST_ARCHIVE" "$out";;
-  https://github.com/iceqi/xymedia-components/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst.sha256) printf '%s  archive\n' "$XYMEDIA_TEST_HASH" > "$out";;
-  https://github.com/iceqi/xymedia-components/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst) cp "$XYMEDIA_TEST_ARCHIVE" "$out";;
-  https://github.com/iceqi/xymedia-components/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst.sha256) printf '%s  archive\n' "$XYMEDIA_TEST_HASH" > "$out";;
+  *https://github.com/iceqi/xymedia-components/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst) cp "$XYMEDIA_TEST_ARCHIVE" "$out";;
+  *https://github.com/iceqi/xymedia-components/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst.sha256) printf '%s  archive\n' "$XYMEDIA_TEST_HASH" > "$out";;
+  *https://github.com/iceqi/xymedia-components/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst) cp "$XYMEDIA_TEST_ARCHIVE" "$out";;
+  *https://github.com/iceqi/xymedia-components/releases/download/tmm-component-sha-a0206a51fd9e/xymedia-tmm-sha-a0206a51fd9e-linux-any.tar.zst.sha256) printf '%s  archive\n' "$XYMEDIA_TEST_HASH" > "$out";;
   *) exit 1;;
 esac
 EOF
@@ -32,12 +32,15 @@ cat > "$TMP/bin/zstd" <<'EOF'
 #!/usr/bin/env sh
 set -eu
 case "$1" in -t) exit 0;; -dc) shift; cat "$1";; esac
+printf '%s\n' "$*" >> "$XYMEDIA_ZSTD_LOG"
 EOF
 cat > "$TMP/bin/tar" <<'EOF'
 #!/usr/bin/env sh
 set -eu
+printf '%s\n' "$*" >> "$XYMEDIA_TAR_LOG"
 case "$1" in
   -xOf) shift 2; case "$1" in manifest.json) printf '%s' "$XYMEDIA_TEST_MANIFEST";; payload/title.bin|payload/tmm.bin) printf '%s' payload;; *) exit 1;; esac;;
+  -xpf) shift 2; test "$1" = -C; mkdir -p "$2/payload"; printf '%s' payload > "$2/payload/$XYMEDIA_TEST_COMPONENT.bin";;
   -tvf) printf '%s\n' '-rw-r--r-- manifest.json' "-rw-r--r-- payload/$XYMEDIA_TEST_COMPONENT.bin";;
   -tf) printf '%s\n' manifest.json "payload/$XYMEDIA_TEST_COMPONENT.bin";;
 esac
@@ -63,9 +66,10 @@ esac
 if [ "${XYMEDIA_FAIL_STOP:-false}" = true ] && [ "$1" = stop ]; then exit 1; fi
 EOF
 chmod +x "$TMP/bin"/*
-export PATH="$TMP/bin:$PATH" XYMEDIA_REAL_JQ="$REAL_JQ" XYMEDIA_TEST_LOG="$TMP/curl.log" XYMEDIA_JQ_LOG="$TMP/jq.log" XYMEDIA_DOCKER_LOG="$TMP/docker.log"
+export PATH="$TMP/bin:$PATH" XYMEDIA_REAL_JQ="$REAL_JQ" XYMEDIA_TEST_LOG="$TMP/curl.log" XYMEDIA_JQ_LOG="$TMP/jq.log" XYMEDIA_ZSTD_LOG="$TMP/zstd.log" XYMEDIA_TAR_LOG="$TMP/tar.log" XYMEDIA_DOCKER_LOG="$TMP/docker.log"
 unset GH_TOKEN GITHUB_TOKEN
 touch "$TMP/docker.log"
+touch "$TMP/zstd.log" "$TMP/tar.log"
 export XYMEDIA_DOCKER_RUN_MARKER="$TMP/docker-run.marker"
 export XYMEDIA_TEST_HASH=201443ee5b61a447ed4edb551d23a57bde2f6bfb68520d2891c6cd66f0fb2b1f
 export XYMEDIA_TEST_ARCHIVE="$TMP/archive"
@@ -83,11 +87,31 @@ set +e
 test $? -eq 2
 set -e
 
-"$SCRIPT" --install-dir "$TMP" --component title --dry-run >/dev/null
+validation_output=$("$SCRIPT" --install-dir "$TMP" --component title --dry-run)
+printf '%s\n' "$validation_output" | grep -q 'title 归档 checksum 校验中。'
+printf '%s\n' "$validation_output" | grep -q 'title payload 校验完成。'
 grep -q '/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst$' "$TMP/curl.log"
 grep -q '/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst.sha256$' "$TMP/curl.log"
+grep -q '^https://gh-proxy.org/https://github.com/iceqi/xymedia-components/releases/download/' "$TMP/curl.log"
+test "$(grep -c -- '-xpf - -C' "$TMP/tar.log")" -eq 1
+test "$(grep -c -- '-xOf - payload/' "$TMP/tar.log")" -eq 0
 if grep -q 'api.github.com\|Authorization\|Bearer' "$TMP/curl.log"; then exit 1; fi
 test ! -s "$TMP/docker.log"
+
+export XYMEDIA_DOWNLOAD_PROXY=''
+: > "$TMP/curl.log"
+"$SCRIPT" --install-dir "$TMP" --component title --dry-run >/dev/null
+grep -q '^https://github.com/iceqi/xymedia-components/releases/download/' "$TMP/curl.log"
+unset XYMEDIA_DOWNLOAD_PROXY
+
+export XYMEDIA_DOWNLOAD_PROXY=http://proxy.example
+: > "$TMP/curl.log"
+set +e
+"$SCRIPT" --install-dir "$TMP" --component title --dry-run >/dev/null 2>&1
+test $? -eq 2
+set -e
+test ! -s "$TMP/curl.log"
+unset XYMEDIA_DOWNLOAD_PROXY
 
 export XYMEDIA_TEST_COMPONENT=tmm XYMEDIA_TEST_HASH=57ee0cdf0cf2127678ab598dfb8e9047e6aa903443f8d616955533e6cca0cfea
 set_manifest '{"schema_version":1,"component":"tmm","release_version":"sha-a0206a51fd9e","platform":"linux/any","files":{"payload/tmm.bin":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'

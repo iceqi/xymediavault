@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
 
 # The lock is deliberately data, rather than a release lookup. Changes to it
 # should be reviewed together with this script.
@@ -27,9 +28,16 @@ if [ -z "$install_dir" ] || [ ! -d "$install_dir" ]; then die '必须提供存�
 case "$component" in title|tmm) ;; all) component='title tmm';; *) die '组件必须是 title、tmm 或 all。';; esac
 [ -f "$install_dir/.env" ] || die "找不到 $install_dir/.env。"
 
-need curl; need jq; need zstd; need tar; need sha256sum; need awk; need grep; need sort; need mktemp
+need curl; need jq; need zstd; need tar; need sha256sum; need awk; need grep; need sort; need mktemp; need cmp
 if [ "$dry_run" = false ]; then need docker; fi
 case "$install_dir" in /*) ;; *) die '--install-dir 必须是绝对路径。';; esac
+
+download_proxy=${XYMEDIA_DOWNLOAD_PROXY-https://gh-proxy.org/}
+if [ -n "$download_proxy" ]; then
+  case "$download_proxy" in https://*) ;; *) die 'XYMEDIA_DOWNLOAD_PROXY 必须是 HTTPS URL 或空值。';; esac
+  while [ "${download_proxy%/}" != "$download_proxy" ]; do download_proxy=${download_proxy%/}; done
+  download_proxy=$download_proxy/
+fi
 
 lock=$LOCK_JSON
 if [ -n "$lock_file" ]; then
@@ -93,30 +101,51 @@ for name in $component; do
   archive=$tmp/$name.tar.zst; checksum=$tmp/$name.sha256
   checksum_asset="$asset.sha256"
   base_url="https://github.com/$repo/releases/download/$tag"
-  curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$asset" -o "$archive" || die "无法下载 $name 归档。"
-  curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$checksum_asset" -o "$checksum" || die "无法下载 $name checksum。"
+  if [ -n "$download_proxy" ]; then base_url=$download_proxy$base_url; fi
+  curl_progress=''
+  if [ "${XYMEDIA_TEST_PROGRESS:-}" = 1 ] || [ -t 2 ]; then curl_progress='--progress-bar'; fi
+  printf '%s\n' "[xymedia] 正在下载 $name 归档：$asset"
+  if [ -n "$curl_progress" ]; then
+    curl --progress-bar --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$asset" -o "$archive" || die "无法下载 $name 归档。"
+  else
+    curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$asset" -o "$archive" || die "无法下载 $name 归档。"
+  fi
+  printf '%s\n' "[xymedia] 正在下载 $name 校验文件：$checksum_asset"
+  if [ -n "$curl_progress" ]; then
+    curl --progress-bar --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$checksum_asset" -o "$checksum" || die "无法下载 $name checksum。"
+  else
+    curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$checksum_asset" -o "$checksum" || die "无法下载 $name checksum。"
+  fi
   checksum_value=$(awk 'NF {count++; value=$1} END {if (count != 1) exit 1; print value}' "$checksum") || die "$name checksum 文件无效。"
   printf '%s\n' "$checksum_value" | grep -Eq '^[0-9A-Fa-f]{64}$' || die "$name checksum 文件无效。"
   checksum_value=$(printf '%s' "$checksum_value" | tr 'A-F' 'a-f')
   [ "$checksum_value" = "$expected" ] || die "$name checksum 不匹配 lock。"
+  printf '%s\n' "[xymedia] $name 归档 checksum 校验中。"
   printf '%s  %s\n' "$checksum_value" "$archive" | sha256sum -c - >/dev/null || die "$name 归档校验失败。"
   zstd -t "$archive" >/dev/null || die "$name 不是有效 zstd 归档。"
+  printf '%s\n' "[xymedia] $name 解压并验证 manifest。"
+  extracted=$tmp/extracted-$name
+  mkdir "$extracted"
+  archive_listing=$(zstd -dc "$archive" | tar -tf -) || die "$name 无法读取归档目录。"
+  if ! printf '%s\n' "$archive_listing" | awk 'BEGIN{bad=0} /^\// || /(^|\/)\.\.?($|\/)/ || /(^|\/)\/|\\/ || !/^[A-Za-z0-9._\/-]+$/ {bad=1} END{exit bad}'; then die "$name 归档包含不安全路径。"; fi
+  if ! printf '%s\n' "$archive_listing" | awk '$0 != "manifest.json" {print}' | sort > "$tmp/$name.archive-files"; then die "$name 无法读取归档文件列表。"; fi
+  if ! zstd -dc "$archive" | tar -tvf - | awk 'BEGIN{bad=0} {if (substr($0,1,1) != "-") bad=1} END{exit bad}'; then die "$name 归档包含非 regular 条目。"; fi
   manifest=$(zstd -dc "$archive" | tar -xOf - manifest.json 2>/dev/null) || die "$name 缺少 manifest.json。"
   if ! printf '%s' "$manifest" | jq -e --arg c "$name" --arg v "$release_version" --arg p "$archive_platform" '(.schema_version==1 and .component==$c and .release_version==$v and .platform==$p and (.files|type=="object"))' >/dev/null; then die "$name manifest 元数据不匹配。"; fi
-  archive_files=$(zstd -dc "$archive" | tar -tf - | awk '$0 != "manifest.json" {print}' | sort)
   manifest_files=$(printf '%s' "$manifest" | jq -r '.files | keys[]' | sort)
-  if [ "$archive_files" != "$manifest_files" ]; then die "$name manifest 文件列表与归档不一致。"; fi
-  if ! zstd -dc "$archive" | tar -tf - | awk 'BEGIN{bad=0} /^\// || /(^|\/)\.\.\// || /(^|\/)\.$/ || /\\/ {bad=1} END{exit bad}'; then die "$name 归档包含不安全路径。"; fi
-  if ! zstd -dc "$archive" | tar -tvf - | awk 'BEGIN{bad=0} {if (substr($0,1,1) != "-") bad=1} END{exit bad}'; then die "$name 归档包含非 regular 条目。"; fi
-  if ! printf '%s' "$manifest" | jq -e 'all(.files | to_entries[]; (.key|type=="string" and startswith("payload/") and (contains("..")|not) and (contains("\\")|not)) and (.value|test("^[0-9a-fA-F]{64}$")))' >/dev/null; then die "$name manifest 文件列表无效。"; fi
+  printf '%s\n' "$manifest_files" > "$tmp/$name.manifest-files"
+  if ! cmp -s "$tmp/$name.archive-files" "$tmp/$name.manifest-files"; then die "$name manifest 文件列表与归档不一致。"; fi
+  if ! printf '%s' "$manifest" | jq -e 'all(.files | to_entries[]; (.key|type=="string" and test("^payload/[A-Za-z0-9._/-]+$") and (contains("..")|not) and (contains("//")|not)) and (.value|test("^[0-9a-fA-F]{64}$")))' >/dev/null; then die "$name manifest 文件列表无效。"; fi
+  zstd -dc "$archive" | tar -xpf - -C "$extracted" || die "$name 归档解压失败。"
   files=$(printf '%s' "$manifest" | jq -r '.files | keys[]')
   for file in $files; do
-    payload_file=$tmp/payload
-    zstd -dc "$archive" | tar -xOf - "$file" > "$payload_file" 2>/dev/null || die "$name 缺少 manifest 声明文件：$file。"
+    payload_file=$extracted/$file
+    [ -f "$payload_file" ] || die "$name 缺少 manifest 声明文件：$file。"
     actual=$(sha256sum "$payload_file" | awk '{print $1}')
     declared=$(printf '%s' "$manifest" | jq -r --arg f "$file" '.files[$f]')
     [ "$actual" = "$declared" ] || die "$name payload digest 不匹配：$file。"
   done
+  printf '%s\n' "[xymedia] $name payload 校验完成。"
   printf '%s\n' "$name: $tag / $asset validated"
 done
 

@@ -113,7 +113,7 @@ verify-release.sh
 
 安装器会使用 `SHA256SUMS` 和 manifest 中的资产哈希，并检查 manifest 绑定的 Release 标签是否为请求的精确版本。该流程不验证 manifest 的 Cosign provenance；`SHA256SUMS` 也不代表发布者身份验证。不要设置已废弃的 `XYMEDIA_SKIP_SIGNATURE_VERIFY`，它会被公开转发器拒绝。
 
-下载可通过 `XYMEDIA_DOWNLOAD_PROXY` 配置代理；生产环境仍应使用 HTTPS，并优先使用上方固定的 Release URL。
+下载可通过 `XYMEDIA_DOWNLOAD_PROXY` 配置代理；组件 Release 资产默认使用 `https://gh-proxy.org/`，设置为空值可直连 GitHub。非空代理必须是 HTTPS，且只会用于本脚本内置的固定 GitHub Release 资产，不支持通过环境变量改变仓库或 tag。生产环境仍应使用 HTTPS。
 
 ## 相关链接
 
@@ -133,8 +133,8 @@ sh update-components.sh --install-dir /opt/xymedia --component title --dry-run
 sh update-components.sh --install-dir /opt/xymedia --component title --yes
 ```
 
-`--component` 可选 `title`、`tmm` 或 `all`。脚本从公开的 [xymedia-components Releases](https://github.com/iceqi/xymedia-components/releases) 直接下载固定资产，不查询 API 或 `latest`。当前锁定 Title `title-component-sha-ab7f33d6ede5`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/title-component-sha-ab7f33d6ede5)）和 TMM `tmm-component-sha-a0206a51fd9e`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/tmm-component-sha-a0206a51fd9e)）。需要变更锁时，使用经过人工审阅的绝对路径 JSON `--lock-file`，不要通过仓库或 tag 环境变量覆盖。
+`--component` 可选 `title`、`tmm` 或 `all`。脚本从公开的 [xymedia-components Releases](https://github.com/iceqi/xymedia-components/releases) 获取固定资产，不查询 API 或 `latest`。当前锁定 Title `title-component-sha-ab7f33d6ede5`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/title-component-sha-ab7f33d6ede5)）和 TMM `tmm-component-sha-a0206a51fd9e`（[Release](https://github.com/iceqi/xymedia-components/releases/tag/tmm-component-sha-a0206a51fd9e)）。需要变更锁时，使用经过人工审阅的绝对路径 JSON `--lock-file`，不要通过仓库或 tag 环境变量覆盖。默认使用 `https://gh-proxy.org/`，设置 `XYMEDIA_DOWNLOAD_PROXY=` 可直连 GitHub；非空值必须为 HTTPS，且仅用于这些固定 Release 资产。
 
-更新前会完成下载、checksum、zstd/tar 路径和 manifest payload 校验；`all` 在两者都通过前不会停止应用。脚本只接受 `.env` 中的 `XYMEDIA_APP_CONTAINER`（默认 `xymedia-app`），要求 `/app/components` 是 named Docker volume，并只停止/启动应用容器。替换前的组件归档保存在该 volume 的 `.xymedia-component-backups/` 下。脚本要求本地已有 `alpine:3.22`，不会在维护窗口自动拉取镜像。
+更新前会显示归档和 checksum 下载进度，并完成归档 checksum、zstd/tar 路径、manifest 和 payload 校验；大型 Title 归档会在预检阶段耗时，但只解压一次后批量校验，不会重复扫描归档。`all` 在两者都通过前不会停止应用。脚本只接受 `.env` 中的 `XYMEDIA_APP_CONTAINER`（默认 `xymedia-app`），要求 `/app/components` 是 named Docker volume，并只停止/启动应用容器。替换前的组件归档保存在该 volume 的 `.xymedia-component-backups/` 下。脚本要求本地已有 `alpine:3.22`，不会在维护窗口自动拉取镜像。
 
 脚本不能可靠判断组件自身的业务健康状态；完成后请检查管理后台。bind mount、anonymous volume、非支持架构或没有本地 helper 镜像时会拒绝执行。
