@@ -101,6 +101,14 @@ if current_dir=$(pwd -P 2>/dev/null) && [ "$current_dir" != / ]; then
 fi
 
 menu_print() { printf '%s\n' "$1" >&4; }
+interactive=0
+status_print() {
+	if [ "$interactive" -eq 1 ]; then
+		printf '%s\n' "$1" >&4
+	else
+		printf '%s\n' "$1" >&2
+	fi
+}
 
 updater_tmp=
 migration_tmp=
@@ -193,6 +201,7 @@ run_fresh_reset() {
 }
 
 	if [ "$#" -eq 0 ] && [ "${XYMEDIA_RELEASE+x}" != x ] && [ "${XYMEDIA_COMMAND+x}" != x ] && [ -r "$tty" ] && [ -w "$tty" ] && exec 3<"$tty" 2>/dev/null && exec 4>>"$tty" 2>/dev/null; then
+		interactive=1
 		if command -v clear >/dev/null 2>&1 && { [ "${XYMEDIA_TEST_TTY+x}" != x ] || [ "${XYMEDIA_TEST_NO_CLEAR:-0}" != 1 ]; }; then
 			clear >&4 2>/dev/null || true
 		fi
@@ -252,16 +261,30 @@ tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-bootstrap.XXXXXX") || error '无法创建�
 bootstrap_tmp=$tmp
 
 asset="https://github.com/iceqi/xymediavault/releases/download/$release/bootstrap.sh"
-if [ -n "${XYMEDIA_DOWNLOAD_PROXY:-}" ]; then
-	proxy=${XYMEDIA_DOWNLOAD_PROXY%/}
+proxy=${XYMEDIA_DOWNLOAD_PROXY-https://gh-proxy.org/}
+download_mode=直连
+if [ -n "$proxy" ]; then
+	while [ "${proxy%/}" != "$proxy" ]; do proxy=${proxy%/}; done
 	case "$proxy" in
 	https://*) ;;
 	*) error '生产环境 XYMEDIA_DOWNLOAD_PROXY 必须使用 HTTPS。' ;;
 	esac
 	asset="$proxy/$asset"
+	download_mode=代理
 fi
 
-curl --proto '=https' --tlsv1.2 -fsSL "$asset" -o "$tmp" || error "无法下载 $release Release bootstrap。"
+if [ "$interactive" -eq 1 ] && [ "${menu_install:-0}" -eq 1 ]; then
+	status_print "[1/2] 正在下载 $release 安装引导脚本..."
+	if ! curl --proto '=https' --tlsv1.2 --progress-bar -fsSL "$asset" -o "$tmp" 2>&4; then
+		error "无法下载 $release Release bootstrap（使用${download_mode}）。"
+	fi
+	status_print "[2/2] 正在启动 $release 安装器；该 Release bootstrap 将继续校验并下载安装器。"
+else
+	status_print "正在下载 $release 安装引导脚本（使用${download_mode}）。"
+	if ! curl --proto '=https' --tlsv1.2 -fsSL "$asset" -o "$tmp"; then
+		error "无法下载 $release Release bootstrap（使用${download_mode}）。"
+	fi
+fi
 bootstrap_env=${selected_locale:-}
 if [ "${compose_only:-0}" -eq 1 ]; then
 	if [ -n "${bootstrap_env:-}" ]; then

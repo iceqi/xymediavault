@@ -16,7 +16,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 安装和 Compose-only 菜单项会提示安装目录；路径含非 ASCII 字节时会先选择已验证的 UTF-8 locale，再启动 bootstrap。若当前 locale、`C.UTF-8`、`en_US.UTF-8` 和系统枚举的 UTF-8 locale 均不可用，会显示“系统缺少 UTF-8 locale，无法安全处理中文路径。”并在 bootstrap 前退出。
 
-组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移会先执行不改变 Docker 状态的预检，只有用户确认后才执行 v1.4.0 布局迁移，原 named volume 会保留。
+组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移会先执行不改变 Docker 状态的预检，只有用户确认后才执行 v1.4.0 布局迁移，原 named volume 会保留。公开 wrapper 的 bootstrap 下载默认使用 `https://gh-proxy.org/`；设置 `XYMEDIA_DOWNLOAD_PROXY=''` 可直连 GitHub，非空值必须是 HTTPS。菜单会显示外层 bootstrap 的下载和启动阶段；启动后，发布的 `v1.4.0` bootstrap 仍会自行校验并下载安装器，该内层步骤不保证显示字节进度。
 
 ## 安装模式
 

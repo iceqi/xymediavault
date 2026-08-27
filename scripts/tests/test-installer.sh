@@ -12,14 +12,17 @@ cat >"$TMP/bin/curl" <<'EOF'
 set -eu
 url=
 destination=
+progress=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) destination=$2; shift 2;;
+    --progress-bar) progress=1; shift;;
     https://*) url=$1; shift;;
     *) shift;;
   esac
 done
 printf '%s\n' "$url" >>"$XYMEDIA_TEST_URL_LOG"
+printf '%s\n' "$progress" >>"${XYMEDIA_TEST_PROGRESS_LOG:-/dev/null}"
 case "$url" in
   https://raw.githubusercontent.com/iceqi/xymediavault/*/scripts/update-components.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_UPDATER_LOG"' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
@@ -48,15 +51,18 @@ assert_forward() {
 
 env -u XYMEDIA_RELEASE -u XYMEDIA_DOWNLOAD_PROXY \
 	XYMEDIA_TEST_TTY="$TMP/missing-tty" XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
-	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+	XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" 2>"$TMP/no-tty.err" >/dev/null
 assert_forward v1.4.0 \
-	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+test "$(tr -d '\n' <"$TMP/progress.log")" = 0
+test "$(wc -l <"$TMP/no-tty.err")" -eq 1
+grep -q '正在下载 v1.4.0 安装引导脚本（使用代理）' "$TMP/no-tty.err"
 
 printf '%s\n' 6 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test ! -e "$TMP/url.log"
 test ! -e "$TMP/updater.log"
@@ -66,13 +72,13 @@ printf '%s\n' 5 "$TMP/fresh" >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(sed -n '1p' "$TMP/reset.log")" = "--install-dir $TMP/fresh"
 test "$(sed -n '1p' "$TMP/url.log")" = \
 	'https://raw.githubusercontent.com/iceqi/xymediavault/b42c25467de718575f68230edfb7947f467db915/scripts/reset-fresh-install.sh'
 test "$(sed -n '2p' "$TMP/url.log")" = \
-	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 test "$(cut -d'|' -f1 "$TMP/bootstrap.log")" = v1.4.0
 test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = install
 test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/fresh"
@@ -148,10 +154,10 @@ printf '%s\n' 3 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 assert_forward v1.4.0 \
-	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = 'compose-only'
 test ! -e "$TMP/updater.log"
 
@@ -169,7 +175,7 @@ printf '%s\n' 2 1 '' y >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(tr -d '\n' <"$TMP/url.log")" = \
   'https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
@@ -207,13 +213,16 @@ test ! -e "$TMP/url.log"
 test ! -e "$TMP/migration.log"
 
 printf '%s\n' 1 >"$TMP/tty-input"
-rm -f "$TMP/url.log" "$TMP/bootstrap.log"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/progress.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 assert_forward v1.4.0 \
-	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+test "$(sed -n '1p' "$TMP/progress.log")" = 1
+grep -q '\[1/2\] 正在下载 v1.4.0 安装引导脚本' "$TMP/tty-input"
+grep -q '\[2/2\] 正在启动 v1.4.0 安装器' "$TMP/tty-input"
 
 : >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log"
@@ -222,7 +231,7 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 assert_forward v1.4.0 \
-	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
+	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 
 grep -q 'XYMEDIA_FUSE_MODE=host-media' "$ROOT/docs/USAGE.md"
 if grep -Eq 'XYMEDIA_FUSE_MODE=host([[:space:]`]|$)' "$ROOT/README.md" "$ROOT/docs/USAGE.md"; then
@@ -273,6 +282,12 @@ assert_forward v1.4.2 \
 env -u XYMEDIA_RELEASE XYMEDIA_DOWNLOAD_PROXY=https://proxy.example/ \
 	XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" v1.4.1 >/dev/null
+assert_forward v1.4.1 \
+	'https://proxy.example/https://github.com/iceqi/xymediavault/releases/download/v1.4.1/bootstrap.sh'
+
+env -u XYMEDIA_RELEASE XYMEDIA_DOWNLOAD_PROXY=https://proxy.example/// \
+	XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" v1.4.1 >/dev/null 2>"$TMP/proxy.err"
 assert_forward v1.4.1 \
 	'https://proxy.example/https://github.com/iceqi/xymediavault/releases/download/v1.4.1/bootstrap.sh'
 

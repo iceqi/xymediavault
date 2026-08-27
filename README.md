@@ -115,7 +115,7 @@ verify-release.sh
 
 安装器会使用 `SHA256SUMS` 和 manifest 中的资产哈希，并检查 manifest 绑定的 Release 标签是否为请求的精确版本。该流程不验证 manifest 的 Cosign provenance；`SHA256SUMS` 也不代表发布者身份验证。不要设置已废弃的 `XYMEDIA_SKIP_SIGNATURE_VERIFY`，它会被公开转发器拒绝。
 
-下载可通过 `XYMEDIA_DOWNLOAD_PROXY` 配置代理；组件 Release 资产默认使用 `https://gh-proxy.org/`，设置为空值可直连 GitHub。非空代理必须是 HTTPS，且只会用于本脚本内置的固定 GitHub Release 资产，不支持通过环境变量改变仓库或 tag。生产环境仍应使用 HTTPS。
+公开 wrapper 的 bootstrap 下载默认使用 `https://gh-proxy.org/`；设置 `XYMEDIA_DOWNLOAD_PROXY=''` 可直连 GitHub。非空代理必须是 HTTPS，且只会用于本脚本内置的固定 GitHub Release 资产，不支持通过环境变量改变仓库或 tag。菜单会显示外层 bootstrap 的下载和启动阶段；随后由发布的 `v1.4.0` bootstrap 自行校验并下载安装器，该内层步骤不保证显示字节进度。组件 Release 资产也遵循同样的代理约定。生产环境仍应使用 HTTPS。
 
 ## 相关链接
 
