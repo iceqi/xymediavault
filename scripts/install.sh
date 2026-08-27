@@ -49,7 +49,57 @@ valid_release "$release" || error "无效的 Release 标签：$release（格式�
 command -v curl >/dev/null 2>&1 || error '安装器需要 curl。'
 command -v mktemp >/dev/null 2>&1 || error '安装器需要 mktemp。'
 
+validate_path_text() {
+	path=$1
+	if LC_ALL=C printf '%s' "$path" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+		error '安装目录不能包含 ASCII 控制字符。'
+	fi
+case "$path" in
+	/*) ;;
+	*) error '安装目录必须是绝对路径。' ;;
+esac
+[ "$path" != / ] || error '不允许使用根目录作为安装目录。'
+}
+
+select_utf8_locale() {
+	path=$1
+	if ! LC_ALL=C printf '%s' "$path" | LC_ALL=C grep -q '[^ -~]'; then
+		selected_locale=
+		return 0
+	fi
+	selected_locale=
+	current_locale=${LC_ALL:-${LANG:-}}
+	if [ -n "$current_locale" ] && LC_ALL="$current_locale" locale charmap 2>/dev/null | LC_ALL=C grep -qi 'UTF-8'; then
+		selected_locale=$current_locale
+	elif LC_ALL=C.UTF-8 locale charmap 2>/dev/null | LC_ALL=C grep -qi 'UTF-8'; then
+		selected_locale=C.UTF-8
+	elif LC_ALL=en_US.UTF-8 locale charmap 2>/dev/null | LC_ALL=C grep -qi 'UTF-8'; then
+		selected_locale=en_US.UTF-8
+	else
+		while IFS= read -r candidate; do
+			if [ -n "$candidate" ] && LC_ALL="$candidate" locale charmap 2>/dev/null | LC_ALL=C grep -qi 'UTF-8'; then
+				selected_locale=$candidate
+				break
+			fi
+		done <<EOF
+$(LC_ALL=C locale -a 2>/dev/null)
+EOF
+	fi
+	[ -n "$selected_locale" ] || error '系统缺少 UTF-8 locale，无法安全处理中文路径。'
+}
+
 tty=${XYMEDIA_TEST_TTY:-/dev/tty}
+if [ -n "${XYMEDIA_INSTALL_DIR:-}" ]; then
+	install_dir=$XYMEDIA_INSTALL_DIR
+	validate_path_text "$XYMEDIA_INSTALL_DIR"
+	select_utf8_locale "$XYMEDIA_INSTALL_DIR"
+fi
+menu_default=/opt/xymedia
+if current_dir=$(pwd -P 2>/dev/null) && [ "$current_dir" != / ]; then
+	menu_default=$current_dir
+fi
+
+menu_print() { printf '%s\n' "$1" >&4; }
 
 run_component_updater() {
 	component=$1
@@ -61,18 +111,23 @@ run_component_updater() {
 	if ! curl --proto '=https' --tlsv1.2 -fsSL "$component_updater_url" -o "$updater_tmp"; then
 		error '无法下载组件更新器，请稍后重试。'
 	fi
-	sh "$updater_tmp" --install-dir "$install_dir" --component "$component" --dry-run
-	printf '%s\n' '验证完成。实际更新会停止并重启应用容器，是否继续？[y/N]：' >&2
+	sh "$updater_tmp" --install-dir "$install_dir" --component "$component" --dry-run >&4 2>&4
+	menu_print '验证完成。实际更新会停止并重启应用容器，是否继续？[y/N]：'
 	if IFS= read -r answer <&3 && case "$answer" in y|Y) true;; *) false;; esac; then
-		sh "$updater_tmp" --install-dir "$install_dir" --component "$component" --yes
+		sh "$updater_tmp" --install-dir "$install_dir" --component "$component" --yes >&4 2>&4
 	else
-		printf '%s\n' '已取消实际更新。'
+		menu_print '已取消实际更新。'
 	fi
 }
 
 component_menu() {
 	while :; do
-		printf '%s\n' '更新 Title/TMM 组件' '1) 更新 Title' '2) 更新 TMM' '3) 更新全部' '4) 返回上一级' '请选择 [4]：'
+		menu_print '更新 Title/TMM 组件'
+		menu_print '1) 更新 Title'
+		menu_print '2) 更新 TMM'
+		menu_print '3) 更新全部'
+		menu_print '4) 返回上一级'
+		menu_print '请选择 [4]：'
 		IFS= read -r choice <&3 || choice=
 		case "$choice" in
 		'') return 0;;
@@ -80,12 +135,12 @@ component_menu() {
 		2) component=tmm;;
 		3) component=all;;
 		4) return 0;;
-		*) printf '%s\n' '请输入 1、2、3 或 4。' >&2; continue;;
+		*) menu_print '请输入 1、2、3 或 4。'; continue;;
 		esac
-		printf '%s\n' '请输入 XyMediaVault 安装目录 [/opt/xymedia]：'
+		menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
 		IFS= read -r install_dir <&3 || install_dir=
-		[ -n "$install_dir" ] || install_dir=/opt/xymedia
-		printf '%s\n' '预检模式不会改变 Docker 状态，开始验证组件更新。'
+		[ -n "$install_dir" ] || install_dir=$menu_default
+		menu_print '预检模式不会改变 Docker 状态，开始验证组件更新。'
 		run_component_updater "$component" "$install_dir"
 		return $?
 	done
@@ -100,37 +155,62 @@ run_storage_migration() {
 	if ! curl --proto '=https' --tlsv1.2 -fsSL "$migration_url" -o "$migration_tmp"; then
 		error '无法下载组件存储迁移脚本，请稍后重试。'
 	fi
-	printf '%s\n' '预检模式不会改变 Docker 状态，开始验证组件存储迁移。'
-	if ! sh "$migration_tmp" --install-dir "$install_dir" --dry-run; then
+	menu_print '预检模式不会改变 Docker 状态，开始验证组件存储迁移。'
+	if ! sh "$migration_tmp" --install-dir "$install_dir" --dry-run >&4 2>&4; then
 		printf '%s\n' '组件存储迁移预检失败，未执行实际迁移。' >&2
 		return 1
 	fi
-	printf '%s\n' '预检完成。实际迁移会复制组件、修改 compose.yaml、重建应用，可能中断服务。是否继续？[y/N]：' >&2
+	menu_print '预检完成。实际迁移会复制组件、修改 compose.yaml、重建应用，可能中断服务。是否继续？[y/N]：'
 	if IFS= read -r answer <&3 && case "$answer" in y|Y) true;; *) false;; esac; then
-		sh "$migration_tmp" --install-dir "$install_dir" --yes
+		sh "$migration_tmp" --install-dir "$install_dir" --yes >&4 2>&4
 	else
-		printf '%s\n' '已取消组件存储迁移。'
+		menu_print '已取消组件存储迁移。'
 	fi
 }
 
-if [ "$#" -eq 0 ] && [ "${XYMEDIA_RELEASE+x}" != x ] && [ "${XYMEDIA_COMMAND+x}" != x ] && [ -r "$tty" ] && [ -w "$tty" ] && exec 3<"$tty" 2>/dev/null; then
+	if [ "$#" -eq 0 ] && [ "${XYMEDIA_RELEASE+x}" != x ] && [ "${XYMEDIA_COMMAND+x}" != x ] && [ -r "$tty" ] && [ -w "$tty" ] && exec 3<"$tty" 2>/dev/null && exec 4>>"$tty" 2>/dev/null; then
+		if command -v clear >/dev/null 2>&1 && { [ "${XYMEDIA_TEST_TTY+x}" != x ] || [ "${XYMEDIA_TEST_NO_CLEAR:-0}" != 1 ]; }; then
+			clear >&4 2>/dev/null || true
+		fi
 	while :; do
-		printf '%s\n' 'XyMediaVault' '1) 安装或升级应用' '2) 更新 Title/TMM 组件' '3) 仅生成 Compose 配置（不创建容器）' '4) 迁移组件存储到宿主机目录' '5) 退出' '请选择 [1]：'
+		menu_print 'XyMediaVault'
+		menu_print '1) 安装或升级应用'
+		menu_print '2) 更新 Title/TMM 组件'
+		menu_print '3) 仅生成 Compose 配置（不创建容器）'
+		menu_print '4) 迁移组件存储到宿主机目录'
+		menu_print '5) 退出'
+		menu_print '请选择 [1]：'
 		IFS= read -r choice <&3 || choice=
 		case "$choice" in
-		1) :;;
+		1)
+			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
+			IFS= read -r install_dir <&3 || install_dir=
+			[ -n "$install_dir" ] || install_dir=$menu_default
+			validate_path_text "$install_dir"
+			select_utf8_locale "$install_dir"
+			menu_install=1
+			break
+			;;
 		'') :;;
 		2) component_menu; exit $?;;
-		3) compose_only=1; break;;
-		4)
-			printf '%s\n' '请输入 XyMediaVault 安装目录 [/opt/xymedia]：'
+		3)
+			compose_only=1
+			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
 			IFS= read -r install_dir <&3 || install_dir=
-			[ -n "$install_dir" ] || install_dir=/opt/xymedia
+			[ -n "$install_dir" ] || install_dir=$menu_default
+			validate_path_text "$install_dir"
+			select_utf8_locale "$install_dir"
+			break
+			;;
+		4)
+			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
+			IFS= read -r install_dir <&3 || install_dir=
+			[ -n "$install_dir" ] || install_dir=$menu_default
 			run_storage_migration "$install_dir"
 			exit $?
 			;;
-		5) printf '%s\n' '已退出。'; exit 0;;
-		*) printf '%s\n' '请输入 1、2、3、4 或 5。' >&2; continue;;
+		5) menu_print '已退出。'; exit 0;;
+		*) menu_print '请输入 1、2、3、4 或 5。'; continue;;
 		esac
 	done
 fi
@@ -150,8 +230,17 @@ if [ -n "${XYMEDIA_DOWNLOAD_PROXY:-}" ]; then
 fi
 
 curl --proto '=https' --tlsv1.2 -fsSL "$asset" -o "$tmp" || error "无法下载 $release Release bootstrap。"
+bootstrap_env=${selected_locale:-}
 if [ "${compose_only:-0}" -eq 1 ]; then
-	XYMEDIA_COMMAND=compose-only sh "$tmp" "$release"
+	if [ -n "${bootstrap_env:-}" ]; then
+		env LC_ALL="$selected_locale" LANG="$selected_locale" XYMEDIA_COMMAND=compose-only XYMEDIA_INSTALL_DIR="$install_dir" sh "$tmp" "$release"
+	else
+		if [ "${menu_install:-0}" -eq 1 ]; then XYMEDIA_COMMAND=compose-only XYMEDIA_INSTALL_DIR="$install_dir" sh "$tmp" "$release"; else XYMEDIA_COMMAND=compose-only sh "$tmp" "$release"; fi
+	fi
 else
-	sh "$tmp" "$release"
+	if [ -n "${bootstrap_env:-}" ]; then
+		if [ "${menu_install:-0}" -eq 1 ]; then env LC_ALL="$selected_locale" LANG="$selected_locale" XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" sh "$tmp" "$release"; else env LC_ALL="$selected_locale" LANG="$selected_locale" sh "$tmp" "$release"; fi
+	else
+		if [ "${menu_install:-0}" -eq 1 ]; then XYMEDIA_COMMAND=install XYMEDIA_INSTALL_DIR="$install_dir" sh "$tmp" "$release"; else sh "$tmp" "$release"; fi
+	fi
 fi

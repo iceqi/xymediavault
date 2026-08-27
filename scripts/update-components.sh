@@ -12,6 +12,8 @@ LOCK_JSON='{
 die() { printf '%s\n' "[xymedia] 错误：$1" >&2; exit 2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "需要 $1。"; }
 usage() { printf '%s\n' '用法：update-components.sh --install-dir DIR --component title|tmm|all [--yes] [--dry-run] [--lock-file FILE]' >&2; exit 2; }
+progress() { if [ -t 2 ]; then printf '\r[%s/%s] %s' "$1" "$2" "$3" >&2; else printf '[%s/%s] %s\n' "$1" "$2" "$3" >&2; fi; }
+progress_done() { if [ -t 2 ]; then printf '\n' >&2; fi; }
 
 install_dir='' component='' dry_run=false yes=false lock_file=''
 while [ "$#" -gt 0 ]; do
@@ -131,13 +133,13 @@ for name in $component; do
   if [ -n "$download_proxy" ]; then base_url=$download_proxy$base_url; fi
   curl_progress=''
   if [ "${XYMEDIA_TEST_PROGRESS:-}" = 1 ] || [ -t 2 ]; then curl_progress='--progress-bar'; fi
-  printf '%s\n' "[xymedia] 正在下载 $name 归档：$asset"
+  progress 1 7 "$name：下载归档"
   if [ -n "$curl_progress" ]; then
     curl --progress-bar --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$asset" -o "$archive" || die "无法下载 $name 归档。"
   else
     curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$asset" -o "$archive" || die "无法下载 $name 归档。"
   fi
-  printf '%s\n' "[xymedia] 正在下载 $name 校验文件：$checksum_asset"
+  progress 2 7 "$name：下载 checksum"
   if [ -n "$curl_progress" ]; then
     curl --progress-bar --proto '=https' --tlsv1.2 --retry 3 --retry-delay 1 -fsSL "$base_url/$checksum_asset" -o "$checksum" || die "无法下载 $name checksum。"
   else
@@ -147,10 +149,10 @@ for name in $component; do
   printf '%s\n' "$checksum_value" | grep -Eq '^[0-9A-Fa-f]{64}$' || die "$name checksum 文件无效。"
   checksum_value=$(printf '%s' "$checksum_value" | tr 'A-F' 'a-f')
   [ "$checksum_value" = "$expected" ] || die "$name checksum 不匹配 lock。"
-  printf '%s\n' "[xymedia] $name 归档 checksum 校验中。"
+  progress 3 7 "$name：校验归档 checksum"
   printf '%s  %s\n' "$checksum_value" "$archive" | sha256sum -c - >/dev/null || die "$name 归档校验失败。"
   zstd -t "$archive" >/dev/null || die "$name 不是有效 zstd 归档。"
-  printf '%s\n' "[xymedia] $name 解压并验证 manifest。"
+  progress 4 7 "$name：验证并解压归档"
   extracted=$tmp/extracted-$name
   mkdir "$extracted"
   archive_listing=$(zstd -dc "$archive" | tar -tf -) || die "$name 无法读取归档目录。"
@@ -165,21 +167,27 @@ for name in $component; do
   if ! printf '%s' "$manifest" | jq -e 'all(.files | to_entries[]; (.key|type=="string" and test("^payload/[A-Za-z0-9._/-]+$") and (contains("..")|not) and (contains("//")|not)) and (.value|test("^[0-9a-fA-F]{64}$")))' >/dev/null; then die "$name manifest 文件列表无效。"; fi
   zstd -dc "$archive" | tar -xpf - -C "$extracted" || die "$name 归档解压失败。"
   files=$(printf '%s' "$manifest" | jq -r '.files | keys[]')
+  total=$(printf '%s\n' "$files" | awk 'NF {n++} END {print n+0}')
+  count=0
   for file in $files; do
     payload_file=$extracted/$file
     [ -f "$payload_file" ] || die "$name 缺少 manifest 声明文件：$file。"
     actual=$(sha256sum "$payload_file" | awk '{print $1}')
     declared=$(printf '%s' "$manifest" | jq -r --arg f "$file" '.files[$f]')
     [ "$actual" = "$declared" ] || die "$name payload digest 不匹配：$file。"
+    count=$((count + 1))
+    if [ "$count" -eq 1 ] || [ $((count % 100)) -eq 0 ] || [ "$count" -eq "$total" ]; then progress 5 7 "$name：校验 payload $count/$total"; fi
   done
-  printf '%s\n' "[xymedia] $name payload 校验完成。"
-  printf '%s\n' "$name: $tag / $asset validated"
+  progress 6 7 "$name：准备存储更新"
+  progress_done
+  printf '%s\n' "$name: $tag / $asset validated" >&2
 done
 
 [ "$dry_run" = true ] && { printf '%s\n' 'dry-run: validation complete; no Docker state changed.'; exit 0; }
 if [ "$yes" != true ]; then printf '%s\n' '未提供 --yes，安全退出；请先使用 --dry-run。' >&2; exit 1; fi
 
 for name in $component; do cp "$tmp/$name.tar.zst" "$tmp/$name.stage"; done
+progress 7 7 '执行组件存储更新'
 docker run --rm --mount "type=$storage_type,src=$storage_source,dst=/components" --mount "type=bind,src=$tmp,dst=/stage,readonly" --entrypoint /bin/sh alpine:3.22 -c 'set -eu; test -w /components; for f in /stage/*.stage; do sha256sum "$f" >/dev/null; done' || die 'Docker helper 预检失败。'
 # Install the recovery trap before the stop attempt. Every variable used by it
 # is initialized above, so an interrupted stop cannot trigger set -u failures.
@@ -221,10 +229,12 @@ mutation_started=true
 changed=true
 docker run --rm --mount "type=$storage_type,src=$storage_source,dst=/components" --mount "type=bind,src=$tmp,dst=/stage,readonly" --entrypoint /bin/sh alpine:3.22 -c 'set -eu; backup=/components/.xymedia-component-backups/'"$timestamp"'; mkdir -p "$backup"; for f in /stage/*.stage; do n=${f##*/}; n=${n%.stage}; if test -f "/components/$n.tar.zst"; then cp "/components/$n.tar.zst" "$backup/$n.tar.zst"; : > "$backup/$n.prior"; else : > "$backup/$n.absent"; fi; done; : > "$backup/mutation-started"; for f in /stage/*.stage; do n=${f##*/}; n=${n%.stage}; cp "$f" "/components/.$n.tar.zst.tmp"; mv "/components/.$n.tar.zst.tmp" "/components/$n.tar.zst"; done' || die '组件写入失败。'
 docker start "$app" >/dev/null || die '无法启动应用容器，已尝试回滚。'
+progress_done
 for i in $(seq 1 180); do
   : "$i"
   status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}' "$app") || status=unknown
-  if [ "$status" = healthy ] || [ "$status" = running ]; then completed=true; trap cleanup 0; trap - HUP INT TERM; exit 0; fi
+  if [ "$status" = healthy ] || [ "$status" = running ]; then progress 7 7 '应用健康检查通过'; progress_done; completed=true; trap cleanup 0; trap - HUP INT TERM; exit 0; fi
+  if [ $((i % 5)) -eq 0 ]; then progress 7 7 "等待应用健康检查（第 $i 次）"; fi
   sleep 1
 done
 die '应用健康检查未在 180 秒内通过。'

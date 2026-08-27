@@ -88,9 +88,9 @@ set +e
 test $? -eq 2
 set -e
 
-validation_output=$("$SCRIPT" --install-dir "$TMP" --component title --dry-run)
-printf '%s\n' "$validation_output" | grep -q 'title 归档 checksum 校验中。'
-printf '%s\n' "$validation_output" | grep -q 'title payload 校验完成。'
+validation_output=$("$SCRIPT" --install-dir "$TMP" --component title --dry-run 2>&1)
+printf '%s\n' "$validation_output" | grep -q '\[1/7\] title：下载归档'
+printf '%s\n' "$validation_output" | grep -q '\[5/7\] title：校验 payload 1/1'
 grep -q '/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst$' "$TMP/curl.log"
 grep -q '/releases/download/title-component-sha-ab7f33d6ede5/xymedia-title-sha-ab7f33d6ede5-linux-amd64.tar.zst.sha256$' "$TMP/curl.log"
 grep -q '^https://gh-proxy.org/https://github.com/iceqi/xymedia-components/releases/download/' "$TMP/curl.log"

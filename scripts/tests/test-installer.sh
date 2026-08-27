@@ -26,7 +26,7 @@ case "$url" in
   https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_MIGRATION_LOG"' 'if [ "${XYMEDIA_TEST_MIGRATION_FAIL:-0}" -eq 1 ] && case " $* " in *" --dry-run "*) true;; *) false;; esac; then exit 1; fi' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
   *)
-    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s\\n" "$1" "$XYMEDIA_COMMAND" "$XYMEDIA_FUSE_MODE" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
+    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s|%s|%s\\n" "$1" "${XYMEDIA_COMMAND:-}" "${XYMEDIA_FUSE_MODE:-}" "${XYMEDIA_INSTALL_DIR:-}" "$LC_ALL" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
 esac
 EOF
 cat >"$TMP/bin/mktemp" <<'EOF'
@@ -34,6 +34,7 @@ cat >"$TMP/bin/mktemp" <<'EOF'
 printf '%s/bootstrap.sh\n' "$XYMEDIA_TEST_TMP"
 EOF
 chmod +x "$TMP/bin/curl" "$TMP/bin/mktemp"
+export XYMEDIA_TEST_NO_CLEAR=1
 
 assert_forward() {
 	expected_release=$1
@@ -75,7 +76,7 @@ rm -f "$TMP/url.log" "$TMP/migration.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
-test "$(sed -n '1p' "$TMP/migration.log")" = '--install-dir /opt/xymedia --dry-run'
+test "$(sed -n '1p' "$TMP/migration.log")" = "--install-dir $(pwd -P) --dry-run"
 test "$(wc -l <"$TMP/migration.log")" -eq 1
 test ! -e "$TMP/bootstrap.sh"
 
@@ -103,6 +104,16 @@ assert_forward v1.4.0 \
 test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = 'compose-only'
 test ! -e "$TMP/updater.log"
 
+mkdir -p "$TMP/中文"
+printf '%s\n' 3 "$TMP/中文" >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log"
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = 'compose-only'
+test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/中文"
+test "$(cut -d'|' -f5 "$TMP/bootstrap.log")" = 'C.UTF-8'
+
 printf '%s\n' 2 1 '' y >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
@@ -111,8 +122,8 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(tr -d '\n' <"$TMP/url.log")" = \
   'https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
-test "$(sed -n '1p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component title --dry-run'
-test "$(sed -n '2p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component title --yes'
+test "$(sed -n '1p' "$TMP/updater.log")" = "--install-dir $(pwd -P) --component title --dry-run"
+test "$(sed -n '2p' "$TMP/updater.log")" = "--install-dir $(pwd -P) --component title --yes"
 if grep -q '/main/scripts/update-components.sh' "$TMP/url.log"; then exit 1; fi
 
 printf '%s\n' 2 4 4 >"$TMP/tty-input"
@@ -130,7 +141,7 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
-test "$(sed -n '1p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component tmm --dry-run'
+test "$(sed -n '1p' "$TMP/updater.log")" = "--install-dir $(pwd -P) --component tmm --dry-run"
 test "$(wc -l <"$TMP/updater.log")" -eq 1
 
 printf '%s\n' bad 5 >"$TMP/tty-input"

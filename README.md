@@ -57,6 +57,8 @@ sh bootstrap.sh v1.4.0
 
 `compose-only` 默认使用 `none`，不需要提供 `XYMEDIA_FUSE_MODE`。它只生成或更新安装配置，不调用 Docker，不创建或改变容器，也不创建或改变 FUSE 状态。完成检查和人工确认后，再执行常规安装命令。
 
+菜单中的安装和 Compose-only 流程会提示安装目录。路径含非 ASCII 字节时，入口会选择已验证的 UTF-8 locale 后再启动 v1.4.0 bootstrap；如果系统没有 UTF-8 locale，会在启动前拒绝执行。路径不含非 ASCII 字节时保持原有行为。
+
 ## 升级
 
 升级必须显式使用 `XYMEDIA_COMMAND=upgrade`，尤其是在非交互环境：
@@ -152,3 +154,6 @@ sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
 ```
 
 迁移只接受 Compose 管理且标签精确匹配的 `components` volume，目标固定为 `/opt/xymedia/components`（即安装目录下的 `components`）；目标目录使用应用可读写的 `0755`，备份目录使用 `0700`。保留原 named volume、迁移备份和顶层 `components:` 定义，不执行删除。迁移前会验证候选 Compose 配置，失败或复制校验失败时不会停止应用；切换后的应用必须达到 `healthy`，否则会恢复原配置并启动旧 named volume。迁移完成后继续使用组件更新脚本即可。
+交互菜单仅在可读写 TTY 中清屏并显示；组件更新和迁移目录提示留空时使用当前工作目录，无法安全规范化时回退 `/opt/xymedia`。长操作显示编号阶段，TTY 使用更新中的一行，非交互和日志使用逐行输出，不保证精确下载百分比。
+
+公开仓库当前尚未把全新重置菜单项接入 `install.sh`，因为该入口必须等待后续提交取得 reset 脚本的不可变 raw pin。已提供的 `scripts/reset-fresh-install.sh` 仅能在交互终端中运行：它只处理 `.env` 中精确 `COMPOSE_PROJECT_NAME` 标签对应的容器、named volume 和网络，删除前要求 `RESET <project>` 与 `y/Y` 两次确认；只备份受控 Release 文件，不删除 `media`、`xiaoya`、`components` 或其他宿主机数据。该独立脚本完成清理与备份后会退出，不会自行启动 fresh install；请保留并检查备份目录，再显式运行安装菜单完成 v1.4.0 全新安装。Docker 数据删除后不可回滚。
