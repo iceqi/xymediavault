@@ -5,6 +5,7 @@ default_release=v1.4.0
 release=${XYMEDIA_RELEASE:-$default_release}
 component_updater_url='https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
 migration_url='https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
+reset_url='https://raw.githubusercontent.com/iceqi/xymediavault/b42c25467de718575f68230edfb7947f467db915/scripts/reset-fresh-install.sh'
 
 error() {
 	printf '%s\n' "[xymedia] 错误：$1" >&2
@@ -101,13 +102,22 @@ fi
 
 menu_print() { printf '%s\n' "$1" >&4; }
 
+updater_tmp=
+migration_tmp=
+reset_tmp=
+bootstrap_tmp=
+cleanup_temps() {
+	[ -z "$updater_tmp" ] || rm -f "$updater_tmp"
+	[ -z "$migration_tmp" ] || rm -f "$migration_tmp"
+	[ -z "$reset_tmp" ] || rm -f "$reset_tmp"
+	[ -z "$bootstrap_tmp" ] || rm -f "$bootstrap_tmp"
+}
+trap cleanup_temps 0 HUP INT TERM
+
 run_component_updater() {
 	component=$1
 	install_dir=$2
 	updater_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-component-updater.XXXXXX") || error '无法创建组件更新临时文件。'
-	# shellcheck disable=SC2317
-	cleanup_updater() { rm -f "$updater_tmp"; }
-	trap cleanup_updater 0 HUP INT TERM
 	if ! curl --proto '=https' --tlsv1.2 -fsSL "$component_updater_url" -o "$updater_tmp"; then
 		error '无法下载组件更新器，请稍后重试。'
 	fi
@@ -149,9 +159,6 @@ component_menu() {
 run_storage_migration() {
 	install_dir=$1
 	migration_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-storage-migration.XXXXXX") || error '无法创建组件迁移临时文件。'
-	# shellcheck disable=SC2317
-	cleanup_migration() { rm -f "$migration_tmp"; }
-	trap cleanup_migration 0 HUP INT TERM
 	if ! curl --proto '=https' --tlsv1.2 -fsSL "$migration_url" -o "$migration_tmp"; then
 		error '无法下载组件存储迁移脚本，请稍后重试。'
 	fi
@@ -168,6 +175,23 @@ run_storage_migration() {
 	fi
 }
 
+run_fresh_reset() {
+	install_dir=$1
+	validate_path_text "$install_dir"
+	select_utf8_locale "$install_dir"
+	reset_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-reset-script.XXXXXX") || error '无法创建重置临时文件。'
+	if ! curl --proto '=https' --tlsv1.2 -fsSL "$reset_url" -o "$reset_tmp"; then
+		error '无法下载全新重置脚本，请稍后重试。'
+	fi
+	menu_print '开始执行全新重置。请按重置脚本提示完成两次确认。'
+	if ! sh "$reset_tmp" --install-dir "$install_dir" >&4 2>&4; then
+		menu_print '全新重置未成功，未启动全新安装。'
+		return 1
+	fi
+	menu_print 'Docker 数据重置成功，开始启动 v1.4.0 全新安装。'
+	release=$default_release
+}
+
 	if [ "$#" -eq 0 ] && [ "${XYMEDIA_RELEASE+x}" != x ] && [ "${XYMEDIA_COMMAND+x}" != x ] && [ -r "$tty" ] && [ -w "$tty" ] && exec 3<"$tty" 2>/dev/null && exec 4>>"$tty" 2>/dev/null; then
 		if command -v clear >/dev/null 2>&1 && { [ "${XYMEDIA_TEST_TTY+x}" != x ] || [ "${XYMEDIA_TEST_NO_CLEAR:-0}" != 1 ]; }; then
 			clear >&4 2>/dev/null || true
@@ -178,7 +202,8 @@ run_storage_migration() {
 		menu_print '2) 更新 Title/TMM 组件'
 		menu_print '3) 仅生成 Compose 配置（不创建容器）'
 		menu_print '4) 迁移组件存储到宿主机目录'
-		menu_print '5) 退出'
+		menu_print '5) 全新重置安装（永久删除此 Compose 项目的 Docker 数据）'
+		menu_print '6) 退出'
 		menu_print '请选择 [1]：'
 		IFS= read -r choice <&3 || choice=
 		case "$choice" in
@@ -209,15 +234,22 @@ run_storage_migration() {
 			run_storage_migration "$install_dir"
 			exit $?
 			;;
-		5) menu_print '已退出。'; exit 0;;
-		*) menu_print '请输入 1、2、3、4 或 5。'; continue;;
+		5)
+			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
+			IFS= read -r install_dir <&3 || install_dir=
+			[ -n "$install_dir" ] || install_dir=$menu_default
+			run_fresh_reset "$install_dir" || exit $?
+			menu_install=1
+			break
+			;;
+		6) menu_print '已退出。'; exit 0;;
+		*) menu_print '请输入 1、2、3、4、5 或 6。'; continue;;
 		esac
 	done
 fi
 
 tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-bootstrap.XXXXXX") || error '无法创建临时文件。'
-cleanup() { rm -f "$tmp"; }
-trap cleanup 0 HUP INT TERM
+bootstrap_tmp=$tmp
 
 asset="https://github.com/iceqi/xymediavault/releases/download/$release/bootstrap.sh"
 if [ -n "${XYMEDIA_DOWNLOAD_PROXY:-}" ]; then

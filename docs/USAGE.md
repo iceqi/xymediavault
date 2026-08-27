@@ -4,7 +4,7 @@
 
 ## 安装入口
 
-当前稳定版本是 `v1.4.0`。生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 迁移组件存储到宿主机目录、`5` 退出：
+当前稳定版本是 `v1.4.0`。生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 迁移组件存储到宿主机目录、`5` 全新重置安装、`6` 退出：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -12,7 +12,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh
 ```
 
-本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件、仅生成 Compose 配置，或迁移组件存储；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
+本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件、仅生成 Compose 配置、迁移组件存储，或执行全新重置安装；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。选择 `5` 会执行固定 SHA 的 reset 脚本，由它负责两次确认；重置取消或失败时不会启动 bootstrap，成功后才以 `XYMEDIA_COMMAND=install` 启动 v1.4.0 全新安装。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
 
 安装和 Compose-only 菜单项会提示安装目录；路径含非 ASCII 字节时会先选择已验证的 UTF-8 locale，再启动 bootstrap。若当前 locale、`C.UTF-8`、`en_US.UTF-8` 和系统枚举的 UTF-8 locale 均不可用，会显示“系统缺少 UTF-8 locale，无法安全处理中文路径。”并在 bootstrap 前退出。
 
@@ -94,4 +94,4 @@ sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
 Release 资产包括 `bootstrap.sh`、`install.sh`、`compose.yaml`、`compose.fuse.yaml`、`config.yaml`、`manifest-v1.json`、`SHA256SUMS`、`upgrade-from-bundled.sh`、`remount-fuse.sh`、`uninstall.sh`、`recovery.md` 和 `verify-release.sh`。没有 manifest 的 `.sig` 或 `.pem` 资产。安装器验证 SHA256SUMS、manifest 资产哈希及精确 manifest 标签绑定，但不验证 manifest Cosign provenance，也不把 SHA-256 校验称为发布者验证。
 交互菜单仅在可读写 TTY 中清屏并显示；组件更新和迁移目录提示留空时使用当前工作目录，无法安全规范化时回退 `/opt/xymedia`。长操作显示编号阶段，非交互和日志使用逐行输出，不保证精确下载百分比。
 
-公开仓库当前尚未把全新重置菜单项接入 `install.sh`，因为该入口必须等待后续提交取得 reset 脚本的不可变 raw pin。`scripts/reset-fresh-install.sh` 仅能在交互终端中运行，使用两次确认并只删除精确 Compose 项目标签对应的容器、named volume 和网络；它只备份 `.env`、Compose、配置及 Release 控制文件，不删除 `media`、`xiaoya`、`components` 或其他宿主机数据。该独立脚本完成清理与备份后会退出，不会自行启动 fresh install；请检查其显示的备份目录，再显式运行安装菜单完成 v1.4.0 全新安装。Docker 数据删除后不可回滚。
+菜单 `5` 会下载并执行固定 SHA `b42c25467de718575f68230edfb7947f467db915` 的 `scripts/reset-fresh-install.sh`。该脚本使用两次确认，只删除精确 Compose 项目标签对应的容器、named volume 和网络，并备份 `.env`、Compose、配置及 Release 控制文件；不会删除 `media`、`xiaoya`、`components` 或其他宿主机数据。取消或失败不会启动 bootstrap，成功后才启动 v1.4.0 全新安装。应用数据删除不可逆，不能承诺卷回滚；宿主机媒体、xiaoya 和 components 保留。
