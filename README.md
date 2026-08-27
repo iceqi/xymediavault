@@ -10,10 +10,8 @@ XyMediaVault 面向小雅 Alist、Emby、Jellyfin、Infuse 和 TVBox，提供媒
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh \
-  -o bootstrap.sh
-less bootstrap.sh
-sh bootstrap.sh v1.4.0
+  'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh' \
+  | sh -s -- v1.4.0
 ```
 
 也可以使用本仓库的转发器；它默认转发到 `v1.4.0`，支持一个明确的 `vX.Y.Z` 或 `vX.Y.Z-beta.N` 参数：
@@ -120,3 +118,21 @@ verify-release.sh
 - [v1.4.0 Release](https://github.com/iceqi/xymediavault/releases/tag/v1.4.0)
 - [使用说明](docs/USAGE.md)
 - [安装脚本](scripts/install.sh)
+
+## 更新 Title/TMM 组件
+
+已安装的 v1.4.0 实例可以在不发布新应用版本的情况下替换组件归档。脚本只使用内置的精确 tag、资产名和 SHA-256，不查询 `latest` 或其他浮动版本；默认支持 `linux/amd64` 和 `linux/arm64`。
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/update-components.sh \
+  -o update-components.sh
+sh update-components.sh --install-dir /opt/xymedia --component title --dry-run
+sh update-components.sh --install-dir /opt/xymedia --component title --yes
+```
+
+`--component` 可选 `title`、`tmm` 或 `all`。当前锁定版本为 Title `component-sha-007ed892afaf`、TMM `component-sha-61e9e46df421`；这些是私有 Release，下载前必须设置 `GH_TOKEN` 或 `GITHUB_TOKEN`。需要变更锁时，使用经过人工审阅的绝对路径 JSON `--lock-file`，不要通过仓库或 tag 环境变量覆盖。
+
+更新前会完成下载、checksum、zstd/tar 路径和 manifest payload 校验；`all` 在两者都通过前不会停止应用。脚本只接受 `.env` 中的 `XYMEDIA_APP_CONTAINER`（默认 `xymedia-app`），要求 `/app/components` 是 named Docker volume，并只停止/启动应用容器。替换前的组件归档保存在该 volume 的 `.xymedia-component-backups/` 下。脚本要求本地已有 `alpine:3.22`，不会在维护窗口自动拉取镜像。
+
+脚本不能可靠判断组件自身的业务健康状态；完成后请检查管理后台。bind mount、anonymous volume、非支持架构或没有本地 helper 镜像时会拒绝执行。

@@ -8,9 +8,8 @@
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh \
-  -o bootstrap.sh
-sh bootstrap.sh v1.4.0
+  'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh' \
+  | sh -s -- v1.4.0
 ```
 
 本仓库的 `scripts/install.sh` 只是 HTTPS Release bootstrap 转发器，不实现部署；默认版本为 `v1.4.0`。它只接受一个可选版本参数，并支持 `XYMEDIA_RELEASE`。版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
@@ -59,5 +58,19 @@ XYMEDIA_FUSE_MODE=none sh bootstrap.sh v1.4.0
 - 不要执行 `docker compose down -v`，除非要永久删除数据库和全部状态。
 - PostgreSQL 默认不映射宿主机 `5432`，不要将其暴露到公网。
 - FUSE 出现 `transport endpoint is not connected` 时，使用固定 Release 的 `remount-fuse.sh`。
+
+## 组件维护
+
+使用公开仓库中的 `scripts/update-components.sh` 更新已安装实例的 Title 或 TMM，不需要重新编译或发布 XyMediaVault 应用：
+
+```bash
+sh scripts/update-components.sh --install-dir /opt/xymedia --component title --dry-run
+sh scripts/update-components.sh --install-dir /opt/xymedia --component tmm --yes
+sh scripts/update-components.sh --install-dir /opt/xymedia --component all --yes
+```
+
+默认精确锁定 Title `component-sha-007ed892afaf` 和 TMM `component-sha-61e9e46df421`，并锁定各架构资产及 SHA-256。这些私有 GitHub Release 必须先设置 `GH_TOKEN` 或 `GITHUB_TOKEN`；脚本不会打印 token。首次操作应先运行 `--dry-run`，真正写入必须显式提供 `--yes`。
+
+脚本会先下载并验证两个归档，再停止应用。它要求 `.env` 中的 `XYMEDIA_APP_CONTAINER`（缺省 `xymedia-app`）、`/app/components` named volume、本地 `alpine:3.22`，并仅重启该应用容器；不支持 bind/anonymous volume。备份位于 volume 的 `.xymedia-component-backups/时间戳/`。应用容器健康检查失败时会尝试恢复选中归档并重启，但脚本无法替代组件业务健康检查，请再检查管理后台。
 
 Release 资产包括 `bootstrap.sh`、`install.sh`、`compose.yaml`、`compose.fuse.yaml`、`config.yaml`、`manifest-v1.json`、`SHA256SUMS`、`upgrade-from-bundled.sh`、`remount-fuse.sh`、`uninstall.sh`、`recovery.md` 和 `verify-release.sh`。没有 manifest 的 `.sig` 或 `.pem` 资产。安装器验证 SHA256SUMS、manifest 资产哈希及精确 manifest 标签绑定，但不验证 manifest Cosign provenance，也不把 SHA-256 校验称为发布者验证。
