@@ -8,13 +8,13 @@
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/817a5e9a571cab4edec35d4735f2f1495ca977d1/scripts/install.sh' \
+  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/4eff6b584eb1844e165c961a38f440f6642a659f/scripts/install.sh' \
   | sh
 ```
 
-以上是绑定提交 `817a5e9a571cab4edec35d4735f2f1495ca977d1` 的固定公共安装入口，用于绕过浮动 `/main/` 的缓存。
+以上是绑定提交 `4eff6b584eb1844e165c961a38f440f6642a659f` 的固定公共安装入口，用于绕过浮动 `/main/` 的缓存。
 
-本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件、仅生成 Compose 配置、迁移组件存储，或执行全新重置安装；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。当前已发布菜单的 reset pin 仍待新 helper 提交后更新；更新后的菜单会提示 Compose 项目名并执行两次确认，重置取消或失败时不会启动 bootstrap，成功后才以 `XYMEDIA_COMMAND=install` 启动 v1.4.0 全新安装。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
+本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件、仅生成 Compose 配置、迁移组件存储，或执行全新重置安装；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。选择 `5` 会提示 Compose 项目名，默认值为 `xymedia`，且必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单从固定 SHA 的公开 reset helper 下载并执行两次确认，只有成功后才以 `XYMEDIA_COMMAND=install` 启动 v1.4.0 全新安装。重置取消或失败时不会启动 bootstrap。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
 
 安装和 Compose-only 菜单项会提示安装目录；路径含非 ASCII 字节时会先选择已验证的 UTF-8 locale，再启动 bootstrap。若当前 locale、`C.UTF-8`、`en_US.UTF-8` 和系统枚举的 UTF-8 locale 均不可用，会显示“系统缺少 UTF-8 locale，无法安全处理中文路径。”并在 bootstrap 前退出。
 
@@ -96,4 +96,4 @@ sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
 Release 资产包括 `bootstrap.sh`、`install.sh`、`compose.yaml`、`compose.fuse.yaml`、`config.yaml`、`manifest-v1.json`、`SHA256SUMS`、`upgrade-from-bundled.sh`、`remount-fuse.sh`、`uninstall.sh`、`recovery.md` 和 `verify-release.sh`。没有 manifest 的 `.sig` 或 `.pem` 资产。安装器验证 SHA256SUMS、manifest 资产哈希及精确 manifest 标签绑定，但不验证 manifest Cosign provenance，也不把 SHA-256 校验称为发布者验证。
 交互菜单仅在可读写 TTY 中清屏并显示；组件更新和迁移目录提示留空时使用当前工作目录，无法安全规范化时回退 `/opt/xymedia`。长操作显示编号阶段，非交互和日志使用逐行输出，不保证精确下载百分比。
 
-全新重置 helper 独立使用 `sh scripts/reset-fresh-install.sh --install-dir /opt/xymedia --project xymedia`，不要求 `.env` 或 `compose.yaml` 存在。项目名必须匹配 ASCII `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单后续版本会在安装目录提示后传入项目名，留空默认值为 `xymedia`。helper 只使用精确 Docker 标签 `com.docker.compose.project=$PROJECT` 发现容器、named volume 和网络，列出全部候选后要求输入 `RESET $PROJECT` 和 `y/Y` 两次确认，再逐项复核标签并停止、非 force 删除容器，删除卷和网络。它不使用 Compose YAML、`docker compose`、`down -v`、prune、名称通配或未由标签发现的资源；没有资源时仍执行相同确认流程。Docker 删除成功后才逐项移动现有 `.env`、Compose、配置及 Release 控制文件到备份目录；`media`、`xiaoya`、`components` 和其他宿主机数据始终保留。取消或失败不会启动 bootstrap。该流程可用于安装失败后 Compose 文件已回滚或删除的目录，且 Docker 数据删除不可逆。
+全新重置 helper 独立使用 `sh scripts/reset-fresh-install.sh --install-dir /opt/xymedia --project xymedia`，不要求 `.env` 或 `compose.yaml` 存在。项目名必须匹配 ASCII `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单会在安装目录提示后传入项目名，留空默认值为 `xymedia`。helper 只使用精确 Docker 标签 `com.docker.compose.project=$PROJECT` 发现容器、named volume 和网络，列出全部候选后要求输入 `RESET $PROJECT` 和 `y/Y` 两次确认，再逐项复核标签并停止、非 force 删除容器，删除卷和网络。它不使用 Compose YAML、`docker compose`、`down -v`、prune、名称通配或未由标签发现的资源；没有资源时仍执行相同确认流程。Docker 删除成功后才逐项移动现有 `.env`、Compose、配置及 Release 控制文件到备份目录；`media`、`xiaoya`、`components` 和其他宿主机数据始终保留。取消或失败不会启动 bootstrap。该流程可用于安装失败后 Compose 文件已回滚或删除的目录，且 Docker 数据删除不可逆。
