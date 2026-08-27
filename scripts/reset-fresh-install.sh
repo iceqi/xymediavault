@@ -43,7 +43,7 @@ list_resources() {
 # Keep each Docker listing command auditable and append its stable records.
 # shellcheck disable=SC2129
 	docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.ID}}\t{{.Names}}\tcontainer\t{{.Status}}' >>"$resources"
-	docker volume ls --filter "label=com.docker.compose.project=$project" --format '{{.ID}}\t{{.Name}}\tvolume\t-' >>"$resources"
+	docker volume ls --filter "label=com.docker.compose.project=$project" --format '{{.Name}}\t{{.Name}}\tvolume\t-' >>"$resources"
 	docker network ls --filter "label=com.docker.compose.project=$project" --format '{{.ID}}\t{{.Name}}\tnetwork\t-' >>"$resources"
 	sort -k3,3 -k1,1 "$resources" -o "$resources"
 }

@@ -18,7 +18,10 @@ set -eu
 printf '%s\n' "$*" >>"$XYMEDIA_DOCKER_LOG"
 case "$*" in
   "ps -a "*) printf 'c1\tapp\tcontainer\tUp\n';;
-  "volume ls "*) printf 'v1\tdata\tvolume\t-\n';;
+  "volume ls "*)
+    case "$*" in *'{{.ID}}'*) exit 42;; esac
+    printf 'v1\tdata\tvolume\t-\n'
+    ;;
   "network ls "*) printf 'n1\tdefault\tnetwork\t-\n';;
   "inspect "*)
     case "$4" in c1) printf '%s\n' xymedia_test;; c2) printf '%s\n' foreign;; v1|n1) printf '%s\n' xymedia_test;; esac
