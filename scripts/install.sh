@@ -3,6 +3,7 @@ set -eu
 
 default_release=v1.4.0
 release=${XYMEDIA_RELEASE:-$default_release}
+component_updater_url='https://raw.githubusercontent.com/iceqi/xymediavault/df4e1ec94fd05e7921c617f32cce83a0224e0fee/scripts/update-components.sh'
 
 error() {
 	printf '%s\n' "[xymedia] 错误：$1" >&2
@@ -46,6 +47,63 @@ valid_release "$release" || error "无效的 Release 标签：$release（格式�
 
 command -v curl >/dev/null 2>&1 || error '安装器需要 curl。'
 command -v mktemp >/dev/null 2>&1 || error '安装器需要 mktemp。'
+
+tty=${XYMEDIA_TEST_TTY:-/dev/tty}
+
+run_component_updater() {
+	component=$1
+	install_dir=$2
+	updater_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-component-updater.XXXXXX") || error '无法创建组件更新临时文件。'
+	# shellcheck disable=SC2317
+	cleanup_updater() { rm -f "$updater_tmp"; }
+	trap cleanup_updater 0 HUP INT TERM
+	if ! curl --proto '=https' --tlsv1.2 -fsSL "$component_updater_url" -o "$updater_tmp"; then
+		error '无法下载组件更新器，请稍后重试。'
+	fi
+	sh "$updater_tmp" --install-dir "$install_dir" --component "$component" --dry-run
+	printf '%s\n' '验证完成。实际更新会停止并重启应用容器，是否继续？[y/N]：' >&2
+	if IFS= read -r answer <&3 && case "$answer" in y|Y) true;; *) false;; esac; then
+		sh "$updater_tmp" --install-dir "$install_dir" --component "$component" --yes
+	else
+		printf '%s\n' '已取消实际更新。'
+	fi
+}
+
+component_menu() {
+	while :; do
+		printf '%s\n' '更新 Title/TMM 组件' '1) 更新 Title' '2) 更新 TMM' '3) 更新全部' '4) 返回上一级' '请选择 [4]：'
+		IFS= read -r choice <&3 || choice=
+		case "$choice" in
+		'') return 0;;
+		1) component=title;;
+		2) component=tmm;;
+		3) component=all;;
+		4) return 0;;
+		*) printf '%s\n' '请输入 1、2、3 或 4。' >&2; continue;;
+		esac
+		printf '%s\n' '请输入 XyMediaVault 安装目录 [/opt/xymedia]：'
+		IFS= read -r install_dir <&3 || install_dir=
+		[ -n "$install_dir" ] || install_dir=/opt/xymedia
+		printf '%s\n' '预检模式不会改变 Docker 状态，开始验证组件更新。'
+		run_component_updater "$component" "$install_dir"
+		return $?
+	done
+}
+
+if [ "$#" -eq 0 ] && [ "${XYMEDIA_RELEASE+x}" != x ] && [ "${XYMEDIA_COMMAND+x}" != x ] && [ -r "$tty" ] && [ -w "$tty" ] && exec 3<"$tty" 2>/dev/null; then
+	while :; do
+		printf '%s\n' 'XyMediaVault' '1) 安装或升级应用' '2) 更新 Title/TMM 组件' '3) 退出' '请选择 [1]：'
+		IFS= read -r choice <&3 || choice=
+		case "$choice" in
+		1) :;;
+		'') :;;
+		2) component_menu; exit $?;;
+		3) printf '%s\n' '已退出。'; exit 0;;
+		*) printf '%s\n' '请输入 1、2 或 3。' >&2; continue;;
+		esac
+		break
+	done
+fi
 
 tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-bootstrap.XXXXXX") || error '无法创建临时文件。'
 cleanup() { rm -f "$tmp"; }
