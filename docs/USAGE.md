@@ -4,7 +4,7 @@
 
 ## 安装入口
 
-当前稳定版本是 `v1.4.0`。生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 退出：
+当前稳定版本是 `v1.4.0`。生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 迁移组件存储到宿主机目录、`5` 退出：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -12,9 +12,9 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh
 ```
 
-本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件，或仅生成 Compose 配置；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
+本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件、仅生成 Compose 配置，或迁移组件存储；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
 
-组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移必须由用户显式运行迁移脚本，不会由更新器自动执行。
+组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移会先执行不改变 Docker 状态的预检，只有用户确认后才执行 v1.4.0 布局迁移，原 named volume 会保留。
 
 ## 安装模式
 
@@ -81,12 +81,12 @@ sh scripts/update-components.sh --install-dir /opt/xymedia --component all --yes
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/iceqi/xymediavault/<migration-commit>/scripts/migrate-components-storage.sh \
+  https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh \
   -o migrate-components-storage.sh
 sh migrate-components-storage.sh --install-dir /opt/xymedia --dry-run
 sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
 ```
 
-将 `<migration-commit>` 替换为已发布的固定提交。脚本只接受当前 Compose 项目管理的 `components` volume，目标固定为安装目录下的 `components`，目标目录为应用可读写的 `0755`，并保留旧 volume、备份和 compose 顶层 `components:` 定义。复制、递归校验或候选 Compose 校验失败时应用保持运行；切换后必须为 `healthy`，否则恢复原 named volume 配置。已迁移实例可继续使用上面的组件更新命令。
+脚本只接受当前 Compose 项目管理的 `components` volume，目标固定为安装目录下的 `components`，目标目录为应用可读写的 `0755`，并保留旧 volume、备份和 compose 顶层 `components:` 定义。复制、递归校验或候选 Compose 校验失败时应用保持运行；切换后必须为 `healthy`，否则恢复原 named volume 配置。已迁移实例可继续使用上面的组件更新命令。
 
 Release 资产包括 `bootstrap.sh`、`install.sh`、`compose.yaml`、`compose.fuse.yaml`、`config.yaml`、`manifest-v1.json`、`SHA256SUMS`、`upgrade-from-bundled.sh`、`remount-fuse.sh`、`uninstall.sh`、`recovery.md` 和 `verify-release.sh`。没有 manifest 的 `.sig` 或 `.pem` 资产。安装器验证 SHA256SUMS、manifest 资产哈希及精确 manifest 标签绑定，但不验证 manifest Cosign provenance，也不把 SHA-256 校验称为发布者验证。

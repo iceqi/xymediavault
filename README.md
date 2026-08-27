@@ -6,7 +6,7 @@ XyMediaVault 面向小雅 Alist、Emby、Jellyfin、Infuse 和 TVBox，提供媒
 
 ## v1.4.0 快速安装
 
-生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 退出：
+生产环境在交互式终端中使用公开安装入口，菜单提供：`1` 安装或升级应用、`2` 更新 Title/TMM 组件、`3` 仅生成 Compose 配置（不创建容器）、`4` 迁移组件存储到宿主机目录、`5` 退出：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -22,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh -s -- v1.4.0
 ```
 
-菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或修改容器，也不创建或修改 FUSE 状态。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移需显式运行迁移脚本，不会由更新器自动触发。
+菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或修改容器，也不创建或修改 FUSE 状态。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。选择 `4` 会下载固定提交中的迁移脚本，只有预检成功并明确确认后才执行 v1.4.0 布局迁移；原 named volume 会保留。
 
 安装器会下载固定 Release 的 `bootstrap.sh`，再由 Release 安装器完成配置和部署。默认安装不启用 FUSE。交互式安装会显示菜单；非交互式 `install` 必须明确设置 `XYMEDIA_FUSE_MODE`，可选 `none` 或 `host-media`。
 
@@ -145,10 +145,10 @@ v1.4.0 的组件默认位于 Docker named volume。需要宿主机可见目录�
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/iceqi/xymediavault/<migration-commit>/scripts/migrate-components-storage.sh \
+  https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh \
   -o migrate-components-storage.sh
 sh migrate-components-storage.sh --install-dir /opt/xymedia --dry-run
 sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
 ```
 
-`<migration-commit>` 必须替换为已发布的固定提交，不要使用 `main`。迁移只接受 Compose 管理且标签精确匹配的 `components` volume，目标固定为 `/opt/xymedia/components`（即安装目录下的 `components`）；目标目录使用应用可读写的 `0755`，备份目录使用 `0700`。保留原 named volume、迁移备份和顶层 `components:` 定义，不执行删除。迁移前会验证候选 Compose 配置，失败或复制校验失败时不会停止应用；切换后的应用必须达到 `healthy`，否则会恢复原配置并启动旧 named volume。迁移完成后继续使用组件更新脚本即可。
+迁移只接受 Compose 管理且标签精确匹配的 `components` volume，目标固定为 `/opt/xymedia/components`（即安装目录下的 `components`）；目标目录使用应用可读写的 `0755`，备份目录使用 `0700`。保留原 named volume、迁移备份和顶层 `components:` 定义，不执行删除。迁移前会验证候选 Compose 配置，失败或复制校验失败时不会停止应用；切换后的应用必须达到 `healthy`，否则会恢复原配置并启动旧 named volume。迁移完成后继续使用组件更新脚本即可。

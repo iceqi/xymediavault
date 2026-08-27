@@ -4,6 +4,7 @@ set -eu
 default_release=v1.4.0
 release=${XYMEDIA_RELEASE:-$default_release}
 component_updater_url='https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
+migration_url='https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
 
 error() {
 	printf '%s\n' "[xymedia] 错误：$1" >&2
@@ -90,17 +91,46 @@ component_menu() {
 	done
 }
 
+run_storage_migration() {
+	install_dir=$1
+	migration_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-storage-migration.XXXXXX") || error '无法创建组件迁移临时文件。'
+	# shellcheck disable=SC2317
+	cleanup_migration() { rm -f "$migration_tmp"; }
+	trap cleanup_migration 0 HUP INT TERM
+	if ! curl --proto '=https' --tlsv1.2 -fsSL "$migration_url" -o "$migration_tmp"; then
+		error '无法下载组件存储迁移脚本，请稍后重试。'
+	fi
+	printf '%s\n' '预检模式不会改变 Docker 状态，开始验证组件存储迁移。'
+	if ! sh "$migration_tmp" --install-dir "$install_dir" --dry-run; then
+		printf '%s\n' '组件存储迁移预检失败，未执行实际迁移。' >&2
+		return 1
+	fi
+	printf '%s\n' '预检完成。实际迁移会复制组件、修改 compose.yaml、重建应用，可能中断服务。是否继续？[y/N]：' >&2
+	if IFS= read -r answer <&3 && case "$answer" in y|Y) true;; *) false;; esac; then
+		sh "$migration_tmp" --install-dir "$install_dir" --yes
+	else
+		printf '%s\n' '已取消组件存储迁移。'
+	fi
+}
+
 if [ "$#" -eq 0 ] && [ "${XYMEDIA_RELEASE+x}" != x ] && [ "${XYMEDIA_COMMAND+x}" != x ] && [ -r "$tty" ] && [ -w "$tty" ] && exec 3<"$tty" 2>/dev/null; then
 	while :; do
-		printf '%s\n' 'XyMediaVault' '1) 安装或升级应用' '2) 更新 Title/TMM 组件' '3) 仅生成 Compose 配置（不创建容器）' '4) 退出' '请选择 [1]：'
+		printf '%s\n' 'XyMediaVault' '1) 安装或升级应用' '2) 更新 Title/TMM 组件' '3) 仅生成 Compose 配置（不创建容器）' '4) 迁移组件存储到宿主机目录' '5) 退出' '请选择 [1]：'
 		IFS= read -r choice <&3 || choice=
 		case "$choice" in
 		1) :;;
 		'') :;;
 		2) component_menu; exit $?;;
 		3) compose_only=1; break;;
-		4) printf '%s\n' '已退出。'; exit 0;;
-		*) printf '%s\n' '请输入 1、2、3 或 4。' >&2; continue;;
+		4)
+			printf '%s\n' '请输入 XyMediaVault 安装目录 [/opt/xymedia]：'
+			IFS= read -r install_dir <&3 || install_dir=
+			[ -n "$install_dir" ] || install_dir=/opt/xymedia
+			run_storage_migration "$install_dir"
+			exit $?
+			;;
+		5) printf '%s\n' '已退出。'; exit 0;;
+		*) printf '%s\n' '请输入 1、2、3、4 或 5。' >&2; continue;;
 		esac
 	done
 fi

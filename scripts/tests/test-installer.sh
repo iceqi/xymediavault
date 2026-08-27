@@ -23,6 +23,8 @@ printf '%s\n' "$url" >"$XYMEDIA_TEST_URL_LOG"
 case "$url" in
   https://raw.githubusercontent.com/iceqi/xymediavault/*/scripts/update-components.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_UPDATER_LOG"' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
+  https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh)
+    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_MIGRATION_LOG"' 'if [ "${XYMEDIA_TEST_MIGRATION_FAIL:-0}" -eq 1 ] && case " $* " in *" --dry-run "*) true;; *) false;; esac; then exit 1; fi' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
   *)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s\\n" "$1" "$XYMEDIA_COMMAND" "$XYMEDIA_FUSE_MODE" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
 esac
@@ -47,7 +49,7 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_DOWNLOAD_PROXY \
 assert_forward v1.4.0 \
 	'https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 
-printf '%s\n' 4 >"$TMP/tty-input"
+printf '%s\n' 5 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
@@ -55,6 +57,40 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test ! -e "$TMP/url.log"
 test ! -e "$TMP/updater.log"
+
+printf '%s\n' 4 /srv/xymedia y >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/migration.log"
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+test "$(tr -d '\n' <"$TMP/url.log")" = \
+	'https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
+test "$(sed -n '1p' "$TMP/migration.log")" = '--install-dir /srv/xymedia --dry-run'
+test "$(sed -n '2p' "$TMP/migration.log")" = '--install-dir /srv/xymedia --yes'
+test ! -e "$TMP/bootstrap.sh"
+if grep -q '/main/scripts/migrate-components-storage.sh' "$TMP/url.log"; then exit 1; fi
+
+printf '%s\n' 4 '' n >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/migration.log"
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+test "$(sed -n '1p' "$TMP/migration.log")" = '--install-dir /opt/xymedia --dry-run'
+test "$(wc -l <"$TMP/migration.log")" -eq 1
+test ! -e "$TMP/bootstrap.sh"
+
+printf '%s\n' 4 /opt/xymedia y >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/migration.log"
+set +e
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+	XYMEDIA_TEST_MIGRATION_LOG="$TMP/migration.log" XYMEDIA_TEST_MIGRATION_FAIL=1 \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null 2>&1
+migration_status=$?
+set -e
+test "$migration_status" -ne 0
+test "$(wc -l <"$TMP/migration.log")" -eq 1
+test ! -e "$TMP/bootstrap.sh"
 
 printf '%s\n' 3 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/updater.log"
@@ -97,15 +133,16 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 test "$(sed -n '1p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component tmm --dry-run'
 test "$(wc -l <"$TMP/updater.log")" -eq 1
 
-printf '%s\n' bad 4 >"$TMP/tty-input"
+printf '%s\n' bad 5 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >"$TMP/menu.out" 2>&1
 test "$(grep -Fc '请选择 [1]：' "$TMP/menu.out")" -eq 2
-test "$(grep -Fc '请输入 1、2、3 或 4。' "$TMP/menu.out")" -ge 1
+test "$(grep -Fc '请输入 1、2、3、4 或 5。' "$TMP/menu.out")" -ge 1
 test ! -e "$TMP/url.log"
+test ! -e "$TMP/migration.log"
 
 printf '%s\n' 1 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log"
