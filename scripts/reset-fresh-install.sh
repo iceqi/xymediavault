@@ -56,7 +56,12 @@ tab=$(printf '\t')
 
 list_resources() {
 	resources=$(mktemp "${TMPDIR:-/tmp}/xymedia-reset.XXXXXX") || error '无法创建重置清单。'
-	trap 'rm -f "$resources"' 0 HUP INT TERM
+	cleanup() {
+		status=$?
+		rm -f "$resources" || :
+		exit "$status"
+	}
+	trap cleanup 0 HUP INT TERM
 # Keep each Docker listing command auditable and append its stable records.
 # shellcheck disable=SC2129
 	docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.ID}}\t{{.Names}}\tcontainer\t{{.Status}}' >>"$resources"
@@ -65,15 +70,16 @@ list_resources() {
 	sort -k3,3 -k1,1 "$resources" -o "$resources"
 }
 menu_print() { printf '%s\n' "$1" >&4; }
+cancel() { menu_print '已取消重置。'; exit 3; }
 list_resources
 menu_print "将清理 Compose 项目 $project 的以下 Docker 资源（仅精确标签匹配）："
 if [ -s "$resources" ]; then cat "$resources" >&4; else menu_print '（没有发现资源）'; fi
-menu_print "请输入 RESET $project 以继续："
+menu_print '确认清理以上资源？1=确认清理，2=取消 [2]：'
 IFS= read -r answer <&3 || answer=
-[ "$answer" = "RESET $project" ] || { menu_print '已取消重置。'; exit 0; }
-menu_print '该操作将永久删除列出的 Docker 数据。确认继续？[y/N]：'
+[ "$answer" = 1 ] || cancel
+menu_print '该操作永久删除 Docker 数据。确认继续？1=继续，2=取消 [2]：'
 IFS= read -r answer <&3 || answer=
-case "$answer" in y|Y) ;; *) menu_print '已取消重置。'; exit 0;; esac
+[ "$answer" = 1 ] || cancel
 
 menu_print '[1/2] 正在逐项复核并删除 Docker 资源...'
 while IFS="$tab" read -r id name type _status; do

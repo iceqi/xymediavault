@@ -50,12 +50,27 @@ chmod +x "$TMP/bin/docker"
 
 run_reset() {
 	printf '%s\n' "$1" "$2" >"$TMP/input"
+	: >"$TMP/docker.log"
 	XYMEDIA_TEST_TTY="$TMP/input" XYMEDIA_DOCKER_LOG="$TMP/docker.log" PATH="$TMP/bin:$PATH" "$RESET" --install-dir "$TMP/install" --project xymedia_test >"$TMP/output" 2>&1
+	status=$?
+	return "$status"
 }
 
-run_reset wrong n
+set +e
+run_reset wrong y
+status=$?
+set -e
+test "$status" -eq 3
 test ! -e "$TMP/install/.env"
-test ! -s "$TMP/docker.log" || exit 1
+test "$(wc -l <"$TMP/docker.log")" -eq 3
+
+set +e
+run_reset 1 wrong
+status=$?
+set -e
+test "$status" -eq 3
+test "$(wc -l <"$TMP/docker.log")" -eq 3
+test "$(wc -l <"$TMP/docker.log")" -eq 3
 
 test_invalid_project() {
 	value=$1
@@ -77,7 +92,11 @@ test_invalid_project "$(printf 'x\tbad')"
 test_invalid_project "$(awk 'BEGIN { printf "x"; for (i = 1; i <= 63; i++) printf "a" }')"
 
 # Existing installation can be reset after both Compose control files are gone.
-run_reset 'RESET xymedia_test' y
+set +e
+run_reset 1 1
+status=$?
+set -e
+test "$status" -eq 0
 test ! -e "$TMP/install/.env"
 test ! -e "$TMP/install/compose.yaml"
 test -f "$TMP/install/media/keep.txt"
@@ -94,7 +113,7 @@ test "$(grep -n 'stop c1' "$TMP/docker.log" | cut -d: -f1)" -lt "$(grep -n 'rm c
 # A foreign label returned by the fake daemon is rejected before deletion.
 rm -rf "$TMP/install/.xymedia-reset-backups"
 : >"$TMP/docker.log"
-printf '%s\n' 'RESET xymedia_test' y >"$TMP/input"
+printf '%s\n' 1 1 >"$TMP/input"
 set +e
 XYMEDIA_TEST_TTY="$TMP/input" XYMEDIA_DOCKER_LOG="$TMP/docker.log" XYMEDIA_FAKE_MODE=foreign PATH="$TMP/bin:$PATH" "$RESET" --install-dir "$TMP/install" --project xymedia_test >"$TMP/output" 2>&1
 status=$?
@@ -108,8 +127,12 @@ if grep -q 'rm ' "$TMP/docker.log"; then exit 1; fi
 rm -rf "$TMP/install/.xymedia-reset-backups"
 printf '%s\n' reset-control >"$TMP/install/.env"
 : >"$TMP/docker.log"
-printf '%s\n' 'RESET xymedia_test' y >"$TMP/input"
+printf '%s\n' 1 1 >"$TMP/input"
+set +e
 XYMEDIA_TEST_TTY="$TMP/input" XYMEDIA_DOCKER_LOG="$TMP/docker.log" XYMEDIA_FAKE_MODE=none PATH="$TMP/bin:$PATH" "$RESET" --install-dir "$TMP/install" --project xymedia_test >"$TMP/output" 2>&1
+status=$?
+set -e
+test "$status" -eq 0
 test ! -e "$TMP/install/.env"
 test -f "$TMP/install/.xymedia-reset-backups"/*/.env
 if grep -q 'stop\| rm ' "$TMP/docker.log"; then exit 1; fi
@@ -118,9 +141,38 @@ if grep -q 'stop\| rm ' "$TMP/docker.log"; then exit 1; fi
 rm -rf "$TMP/install/.xymedia-reset-backups"
 printf '%s\n' cancel >"$TMP/install/.env"
 : >"$TMP/docker.log"
-run_reset 'RESET xymedia_test' n
+set +e
+run_reset 1 2
+status=$?
+set -e
+test "$status" -eq 3
 test -f "$TMP/install/.env"
 test ! -e "$TMP/install/.xymedia-reset-backups"
-if grep -q 'stop\| rm ' "$TMP/docker.log"; then exit 1; fi
+test "$(wc -l <"$TMP/docker.log")" -eq 3
+
+# EOF at either confirmation is also a safe cancellation.
+rm -rf "$TMP/install/.xymedia-reset-backups"
+: >"$TMP/docker.log"
+printf '%s\n' 1 >"$TMP/input"
+set +e
+XYMEDIA_TEST_TTY="$TMP/input" XYMEDIA_DOCKER_LOG="$TMP/docker.log" PATH="$TMP/bin:$PATH" "$RESET" --install-dir "$TMP/install" --project xymedia_test >"$TMP/output" 2>&1
+status=$?
+set -e
+test "$status" -eq 3
+test -f "$TMP/install/.env"
+test ! -e "$TMP/install/.xymedia-reset-backups"
+test "$(wc -l <"$TMP/docker.log")" -eq 3
+
+rm -rf "$TMP/install/.xymedia-reset-backups"
+: >"$TMP/docker.log"
+: >"$TMP/input"
+set +e
+XYMEDIA_TEST_TTY="$TMP/input" XYMEDIA_DOCKER_LOG="$TMP/docker.log" PATH="$TMP/bin:$PATH" "$RESET" --install-dir "$TMP/install" --project xymedia_test >"$TMP/output" 2>&1
+status=$?
+set -e
+test "$status" -eq 3
+test -f "$TMP/install/.env"
+test ! -e "$TMP/install/.xymedia-reset-backups"
+test ! -s "$TMP/docker.log"
 
 printf '%s\n' 'reset tests: PASS'
