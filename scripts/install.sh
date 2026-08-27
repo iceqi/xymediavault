@@ -3,7 +3,7 @@ set -eu
 
 default_release=v1.4.0
 release=${XYMEDIA_RELEASE:-$default_release}
-component_updater_url='https://raw.githubusercontent.com/iceqi/xymediavault/df4e1ec94fd05e7921c617f32cce83a0224e0fee/scripts/update-components.sh'
+component_updater_url='https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
 
 error() {
 	printf '%s\n' "[xymedia] 错误：$1" >&2

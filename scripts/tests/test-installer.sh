@@ -63,7 +63,7 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(tr -d '\n' <"$TMP/url.log")" = \
-	'https://raw.githubusercontent.com/iceqi/xymediavault/df4e1ec94fd05e7921c617f32cce83a0224e0fee/scripts/update-components.sh'
+  'https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
 test "$(sed -n '1p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component title --dry-run'
 test "$(sed -n '2p' "$TMP/updater.log")" = '--install-dir /opt/xymedia --component title --yes'
 if grep -q '/main/scripts/update-components.sh' "$TMP/url.log"; then exit 1; fi

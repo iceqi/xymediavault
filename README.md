@@ -22,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh -s -- v1.4.0
 ```
 
-菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。菜单使用固定到 `df4e1ec94fd05e7921c617f32cce83a0224e0fee` 的公开更新器（[固定脚本](https://raw.githubusercontent.com/iceqi/xymediavault/df4e1ec94fd05e7921c617f32cce83a0224e0fee/scripts/update-components.sh)），组件 Release 仍由更新器内置锁和 SHA-256 校验保护。
+菜单需要可读写的交互式终端；通过管道运行且没有 TTY 时会直接执行默认的 `v1.4.0` bootstrap。组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。菜单使用固定到 `21e99c95df0c800079fff327c5fcf78b05734612` 的公开更新器（[固定脚本](https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh)），组件 Release 仍由更新器内置锁和 SHA-256 校验保护。
 
 安装器会下载固定 Release 的 `bootstrap.sh`，再由 Release 安装器完成配置和部署。默认安装不启用 FUSE。交互式安装会显示菜单；非交互式 `install` 必须明确设置 `XYMEDIA_FUSE_MODE`，可选 `none` 或 `host-media`。
 
