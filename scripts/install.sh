@@ -5,10 +5,15 @@ default_release=v1.4.0
 release=${XYMEDIA_RELEASE:-$default_release}
 component_updater_url='https://raw.githubusercontent.com/iceqi/xymediavault/21e99c95df0c800079fff327c5fcf78b05734612/scripts/update-components.sh'
 migration_url='https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh'
-reset_url='https://raw.githubusercontent.com/iceqi/xymediavault/b42c25467de718575f68230edfb7947f467db915/scripts/reset-fresh-install.sh'
+reset_url='https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
+interactive=0
 
 error() {
-	printf '%s\n' "[xymedia] 错误：$1" >&2
+	if [ "$interactive" -eq 1 ]; then
+		printf '%s\n' "[xymedia] 错误：$1" >&4
+	else
+		printf '%s\n' "[xymedia] 错误：$1" >&2
+	fi
 	exit 2
 }
 
@@ -38,6 +43,16 @@ valid_release() {
 	patch=${rest#*.}
 	[ "$rest" != "$body" ] && [ "$patch" != "$rest" ] || return 1
 	digits_only "$major" && digits_only "$minor" && digits_only "$patch"
+}
+
+valid_project() {
+	case "$1" in
+	'' | *[!a-z0-9_-]*) return 1 ;;
+	esac
+	case "$1" in
+	[a-z0-9]*) [ "${#1}" -le 63 ] ;;
+	*) return 1 ;;
+	esac
 }
 
 [ "$#" -le 1 ] || error '只接受一个可选的 Release 标签参数，例如 v1.4.0。'
@@ -101,7 +116,6 @@ if current_dir=$(pwd -P 2>/dev/null) && [ "$current_dir" != / ]; then
 fi
 
 menu_print() { printf '%s\n' "$1" >&4; }
-interactive=0
 status_print() {
 	if [ "$interactive" -eq 1 ]; then
 		printf '%s\n' "$1" >&4
@@ -185,6 +199,7 @@ run_storage_migration() {
 
 run_fresh_reset() {
 	install_dir=$1
+	project=$2
 	validate_path_text "$install_dir"
 	select_utf8_locale "$install_dir"
 	reset_tmp=$(mktemp "${TMPDIR:-/tmp}/xymedia-reset-script.XXXXXX") || error '无法创建重置临时文件。'
@@ -192,7 +207,7 @@ run_fresh_reset() {
 		error '无法下载全新重置脚本，请稍后重试。'
 	fi
 	menu_print '开始执行全新重置。请按重置脚本提示完成两次确认。'
-	if ! sh "$reset_tmp" --install-dir "$install_dir" >&4 2>&4; then
+	if ! sh "$reset_tmp" --install-dir "$install_dir" --project "$project" >&4 2>&4; then
 		menu_print '全新重置未成功，未启动全新安装。'
 		return 1
 	fi
@@ -220,6 +235,7 @@ run_fresh_reset() {
 			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
 			IFS= read -r install_dir <&3 || install_dir=
 			[ -n "$install_dir" ] || install_dir=$menu_default
+			status_print "[0/2] 已确认安装目录：$install_dir"
 			validate_path_text "$install_dir"
 			select_utf8_locale "$install_dir"
 			menu_install=1
@@ -232,6 +248,7 @@ run_fresh_reset() {
 			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
 			IFS= read -r install_dir <&3 || install_dir=
 			[ -n "$install_dir" ] || install_dir=$menu_default
+			status_print "[0/2] 已确认安装目录：$install_dir"
 			validate_path_text "$install_dir"
 			select_utf8_locale "$install_dir"
 			break
@@ -240,6 +257,7 @@ run_fresh_reset() {
 			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
 			IFS= read -r install_dir <&3 || install_dir=
 			[ -n "$install_dir" ] || install_dir=$menu_default
+			status_print "[0/2] 已确认安装目录：$install_dir"
 			run_storage_migration "$install_dir"
 			exit $?
 			;;
@@ -247,7 +265,15 @@ run_fresh_reset() {
 			menu_print "请输入 XyMediaVault 安装目录 [$menu_default]（留空使用当前目录）："
 			IFS= read -r install_dir <&3 || install_dir=
 			[ -n "$install_dir" ] || install_dir=$menu_default
-			run_fresh_reset "$install_dir" || exit $?
+			status_print "[0/2] 已确认安装目录：$install_dir"
+			menu_print '请输入 Compose 项目名 [xymedia]（留空使用默认值）：'
+			IFS= read -r project <&3 || project=
+			[ -n "$project" ] || project=xymedia
+			if ! valid_project "$project"; then
+				error 'Compose 项目名格式无效。请输入 1-63 位小写字母、数字、下划线或连字符，且必须以小写字母或数字开头。'
+			fi
+			status_print "[0/2] 已确认 Compose 项目名：$project"
+			run_fresh_reset "$install_dir" "$project" || exit $?
 			menu_install=1
 			break
 			;;
@@ -275,14 +301,14 @@ fi
 
 if [ "$interactive" -eq 1 ] && [ "${menu_install:-0}" -eq 1 ]; then
 	status_print "[1/2] 正在下载 $release 安装引导脚本..."
-	if ! curl --proto '=https' --tlsv1.2 --progress-bar -fsSL "$asset" -o "$tmp" 2>&4; then
-		error "无法下载 $release Release bootstrap（使用${download_mode}）。"
+	if ! curl --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 1 --progress-bar -fsSL "$asset" -o "$tmp" 2>&4; then
+		error "无法下载 $release Release bootstrap（使用${download_mode}，目标：$asset）。请设置 XYMEDIA_DOWNLOAD_PROXY='' 可直连重试。"
 	fi
 	status_print "[2/2] 正在启动 $release 安装器；该 Release bootstrap 将继续校验并下载安装器。"
 else
 	status_print "正在下载 $release 安装引导脚本（使用${download_mode}）。"
-	if ! curl --proto '=https' --tlsv1.2 -fsSL "$asset" -o "$tmp"; then
-		error "无法下载 $release Release bootstrap（使用${download_mode}）。"
+	if ! curl --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 1 -fsSL "$asset" -o "$tmp"; then
+		error "无法下载 $release Release bootstrap（使用${download_mode}，目标：$asset）。请设置 XYMEDIA_DOWNLOAD_PROXY='' 可直连重试。"
 	fi
 fi
 bootstrap_env=${selected_locale:-}

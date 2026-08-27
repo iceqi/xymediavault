@@ -101,7 +101,7 @@ status=$?
 set -e
 test "$status" -eq 2
 test ! -e "$TMP/install/.xymedia-reset-backups"
-! test -f "$TMP/install/.xymedia-reset-backups"/"*"/config.yaml
+if test -f "$TMP/install/.xymedia-reset-backups"/"*"/config.yaml; then exit 1; fi
 if grep -q 'rm ' "$TMP/docker.log"; then exit 1; fi
 
 # No matching resources still requires both confirmations and creates a backup.

@@ -23,15 +23,18 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\n' "$url" >>"$XYMEDIA_TEST_URL_LOG"
 printf '%s\n' "$progress" >>"${XYMEDIA_TEST_PROGRESS_LOG:-/dev/null}"
+if [ "${XYMEDIA_TEST_CURL_FAIL:-0}" -eq 1 ] && case "$url" in *'/releases/download/'*) true;; *) false;; esac; then
+	  exit 1
+fi
 case "$url" in
   https://raw.githubusercontent.com/iceqi/xymediavault/*/scripts/update-components.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_UPDATER_LOG"' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
   https://raw.githubusercontent.com/iceqi/xymediavault/9fa0ed12a8547895f44ecea036bf5558053798c2/scripts/migrate-components-storage.sh)
     printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_MIGRATION_LOG"' 'if [ "${XYMEDIA_TEST_MIGRATION_FAIL:-0}" -eq 1 ] && case " $* " in *" --dry-run "*) true;; *) false;; esac; then exit 1; fi' 'case " $* " in *" --dry-run "*) exit 0;; esac' >"$destination";;
-  https://raw.githubusercontent.com/iceqi/xymediavault/b42c25467de718575f68230edfb7947f467db915/scripts/reset-fresh-install.sh)
-    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s\\n" "$*" >>"$XYMEDIA_TEST_RESET_LOG"' 'if [ "${XYMEDIA_TEST_RESET_FAIL:-0}" -eq 1 ]; then exit 1; fi' >"$destination";;
+  https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh)
+    printf '%s\n' '#!/usr/bin/env sh' 'test "$#" -eq 4' 'test "$1" = --install-dir' 'test "$2" = "$XYMEDIA_TEST_EXPECTED_RESET_DIR"' 'test "$3" = --project' 'test "$4" = "$XYMEDIA_TEST_EXPECTED_RESET_PROJECT"' 'printf "%s|%s\\n" "$2" "$4" >>"$XYMEDIA_TEST_RESET_LOG"' 'if [ "${XYMEDIA_TEST_RESET_FAIL:-0}" -eq 1 ]; then exit 1; fi' >"$destination";;
   *)
-    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s|%s|%s\\n" "$1" "${XYMEDIA_COMMAND:-}" "${XYMEDIA_FUSE_MODE:-}" "${XYMEDIA_INSTALL_DIR:-}" "$LC_ALL" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
+    printf '%s\n' '#!/usr/bin/env sh' 'printf "%s|%s|%s|%s|%s\\n" "$1" "${XYMEDIA_COMMAND:-}" "${XYMEDIA_FUSE_MODE:-}" "${XYMEDIA_INSTALL_DIR:-}" "${LC_ALL:-}" >"$XYMEDIA_TEST_BOOTSTRAP_LOG"' >"$destination";;
 esac
 EOF
 cat >"$TMP/bin/mktemp" <<'EOF'
@@ -68,25 +71,48 @@ test ! -e "$TMP/url.log"
 test ! -e "$TMP/updater.log"
 
 mkdir -p "$TMP/fresh"
-printf '%s\n' 5 "$TMP/fresh" >"$TMP/tty-input"
+printf '%s\n' 5 "$TMP/fresh" '' >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" XYMEDIA_TEST_EXPECTED_RESET_DIR="$TMP/fresh" XYMEDIA_TEST_EXPECTED_RESET_PROJECT=xymedia XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
-test "$(sed -n '1p' "$TMP/reset.log")" = "--install-dir $TMP/fresh"
+test "$(sed -n '1p' "$TMP/reset.log")" = "$TMP/fresh|xymedia"
 test "$(sed -n '1p' "$TMP/url.log")" = \
-	'https://raw.githubusercontent.com/iceqi/xymediavault/b42c25467de718575f68230edfb7947f467db915/scripts/reset-fresh-install.sh'
+	'https://raw.githubusercontent.com/iceqi/xymediavault/8da3d162ac9945d3887df524c7b6a5c8c89d3d1a/scripts/reset-fresh-install.sh'
 test "$(sed -n '2p' "$TMP/url.log")" = \
 	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 test "$(cut -d'|' -f1 "$TMP/bootstrap.log")" = v1.4.0
 test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = install
 test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/fresh"
 
+mkdir -p "$TMP/custom"
+printf '%s\n' 5 "$TMP/custom" xymedia_test 6 >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" XYMEDIA_TEST_EXPECTED_RESET_DIR="$TMP/custom" XYMEDIA_TEST_EXPECTED_RESET_PROJECT=xymedia_test \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+test "$(sed -n '1p' "$TMP/reset.log")" = "$TMP/custom|xymedia_test"
+test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/custom"
+
+printf '%s\n' 5 "$TMP/custom" 'Bad Project' >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
+set +e
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
+	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" \
+	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >"$TMP/invalid.out" 2>&1
+invalid_status=$?
+set -e
+test "$invalid_status" -ne 0
+grep -q 'Compose 项目名格式无效' "$TMP/tty-input"
+test ! -e "$TMP/url.log"
+test ! -e "$TMP/bootstrap.log"
+
 printf '%s\n' 5 "$TMP/fresh" >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
 set +e
-env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_RESET_FAIL=1 \
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_CURL_FAIL=0 XYMEDIA_TEST_RESET_FAIL=1 XYMEDIA_TEST_EXPECTED_RESET_DIR="$TMP/fresh" XYMEDIA_TEST_EXPECTED_RESET_PROJECT=xymedia \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null 2>&1
@@ -94,8 +120,7 @@ reset_status=$?
 set -e
 test "$reset_status" -ne 0
 test ! -e "$TMP/bootstrap.log"
-test "$(tr -d '\n' <"$TMP/url.log")" = \
-	'https://raw.githubusercontent.com/iceqi/xymediavault/b42c25467de718575f68230edfb7947f467db915/scripts/reset-fresh-install.sh'
+if grep -Eq 'b42c25467de718575f68230edfb7947f467db915|raw.githubusercontent.com/iceqi/xymediavault/main/scripts/reset-fresh-install.sh' "$ROOT/scripts/install.sh" "$ROOT/scripts/tests/test-installer.sh"; then exit 1; fi
 
 printf '%s\n' 6 >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/reset.log"
@@ -112,8 +137,8 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_RESET_LOG="$TMP/reset.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >"$TMP/menu.out" 2>&1
-test "$(grep -Fc '请选择 [1]：' "$TMP/menu.out")" -eq 2
-test "$(grep -Fc '请输入 1、2、3、4、5 或 6。' "$TMP/menu.out")" -ge 1
+test "$(grep -Fc '请选择 [1]：' "$TMP/tty-input")" -eq 2
+test "$(grep -Fc '请输入 1、2、3、4、5 或 6。' "$TMP/tty-input")" -ge 1
 test ! -e "$TMP/url.log"
 
 printf '%s\n' 4 /srv/xymedia y >"$TMP/tty-input"
@@ -188,7 +213,7 @@ rm -f "$TMP/url.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
-	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
+	XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test ! -e "$TMP/url.log"
 test ! -e "$TMP/updater.log"
 
@@ -196,7 +221,7 @@ printf '%s\n' 2 2 '' n >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/updater.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 test "$(sed -n '1p' "$TMP/updater.log")" = "--install-dir $(pwd -P) --component tmm --dry-run"
 test "$(wc -l <"$TMP/updater.log")" -eq 1
@@ -207,22 +232,39 @@ env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
 	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >"$TMP/menu.out" 2>&1
-test "$(grep -Fc '请选择 [1]：' "$TMP/menu.out")" -eq 2
-test "$(grep -Fc '请输入 1、2、3、4、5 或 6。' "$TMP/menu.out")" -ge 1
+test "$(grep -Fc '请选择 [1]：' "$TMP/tty-input")" -eq 2
+test "$(grep -Fc '请输入 1、2、3、4、5 或 6。' "$TMP/tty-input")" -ge 1
 test ! -e "$TMP/url.log"
 test ! -e "$TMP/migration.log"
 
-printf '%s\n' 1 >"$TMP/tty-input"
+mkdir -p "$TMP/install-choice"
+printf '%s\n' 1 "$TMP/install-choice" >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/progress.log"
 env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND \
 	XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
-	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" \
+	XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_UPDATER_LOG="$TMP/updater.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
 	XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null
 assert_forward v1.4.0 \
 	'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh'
 test "$(sed -n '1p' "$TMP/progress.log")" = 1
+grep -Fq "[0/2] 已确认安装目录：$TMP/install-choice" "$TMP/tty-input"
 grep -q '\[1/2\] 正在下载 v1.4.0 安装引导脚本' "$TMP/tty-input"
 grep -q '\[2/2\] 正在启动 v1.4.0 安装器' "$TMP/tty-input"
+test "$(cut -d'|' -f2 "$TMP/bootstrap.log")" = install
+test "$(cut -d'|' -f4 "$TMP/bootstrap.log")" = "$TMP/install-choice"
+
+printf '%s\n' 1 "$TMP/install-choice" >"$TMP/tty-input"
+rm -f "$TMP/url.log" "$TMP/bootstrap.log" "$TMP/progress.log"
+set +e
+env -u XYMEDIA_RELEASE -u XYMEDIA_COMMAND XYMEDIA_TEST_CURL_FAIL=1 \
+  XYMEDIA_TEST_TTY="$TMP/tty-input" XYMEDIA_TEST_URL_LOG="$TMP/url.log" \
+  XYMEDIA_TEST_BOOTSTRAP_LOG="$TMP/bootstrap.log" XYMEDIA_TEST_PROGRESS_LOG="$TMP/progress.log" \
+  XYMEDIA_TEST_TMP="$TMP" PATH="$TMP/bin:$PATH" "$INSTALL" >/dev/null 2>&1
+install_status=$?
+set -e
+test "$install_status" -ne 0
+grep -q '\[xymedia\] 错误：无法下载 v1.4.0 Release bootstrap' "$TMP/tty-input"
+grep -q "XYMEDIA_DOWNLOAD_PROXY='' 可直连重试" "$TMP/tty-input"
 
 : >"$TMP/tty-input"
 rm -f "$TMP/url.log" "$TMP/bootstrap.log"
