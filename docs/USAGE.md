@@ -8,17 +8,17 @@
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/4eff6b584eb1844e165c961a38f440f6642a659f/scripts/install.sh' \
+  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/c3c9dcd887f87c613e0643131859203a84284257/scripts/install.sh' \
   | sh
 ```
 
-以上是绑定提交 `4eff6b584eb1844e165c961a38f440f6642a659f` 的固定公共安装入口，用于绕过浮动 `/main/` 的缓存。
+以上是绑定提交 `c3c9dcd887f87c613e0643131859203a84284257` 的固定公共安装入口，用于绕过浮动 `/main/` 的缓存。
 
-本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件、仅生成 Compose 配置、迁移组件存储，或执行全新重置安装；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不创建或改变 FUSE 状态。选择 `5` 会提示 Compose 项目名，默认值为 `xymedia`，且必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单从固定 SHA 的公开 reset helper 下载并执行两次确认，只有成功后才以 `XYMEDIA_COMMAND=install` 启动 v1.4.0 全新安装。重置取消或失败时不会启动 bootstrap。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
+本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用、更新 Title/TMM 组件、仅生成 Compose 配置、迁移组件存储，或执行全新重置安装；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。选择 `1` 或选择 `5` 并完成重置后，会在 bootstrap 前询问媒体挂载方式：`1` 填写宿主机 FUSE 绝对路径，留空或 `2` 不挂载；wrapper 不创建目标路径，只要求父目录已存在且不是符号链接。选择 `3` 会复用精确的 `v1.4.0` Release bootstrap，仅生成或更新 Compose 配置，不调用 Docker、不创建或改变容器，也不询问 FUSE。选择 `5` 会提示 Compose 项目名，默认值为 `xymedia`，且必须匹配 `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单从固定 SHA 的公开 reset helper 下载并执行两次数字确认，只有成功后才以 `XYMEDIA_COMMAND=install` 启动 v1.4.0 全新安装。重置取消或失败时不会启动 bootstrap。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
 
 安装和 Compose-only 菜单项会提示安装目录；路径含非 ASCII 字节时会先选择已验证的 UTF-8 locale，再启动 bootstrap。若当前 locale、`C.UTF-8`、`en_US.UTF-8` 和系统枚举的 UTF-8 locale 均不可用，会显示“系统缺少 UTF-8 locale，无法安全处理中文路径。”并在 bootstrap 前退出。
 
-组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移会先执行不改变 Docker 状态的预检，只有用户确认后才执行 v1.4.0 布局迁移，原 named volume 会保留。公开 wrapper 的 bootstrap 下载默认使用 `https://gh-proxy.org/`；设置 `XYMEDIA_DOWNLOAD_PROXY=''` 可直连 GitHub，非空值必须是 HTTPS。菜单会显示外层 bootstrap 的下载和启动阶段；启动后，发布的 `v1.4.0` bootstrap 仍会自行校验并下载安装器，该内层步骤不保证显示字节进度。
+组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。组件存储迁移会先执行不改变 Docker 状态的预检，只有用户确认后才执行 v1.4.0 布局迁移，原 named volume 会保留。公开 wrapper 的 bootstrap 和菜单 helper 脚本下载默认使用 `https://gh-proxy.org/`；设置 `XYMEDIA_DOWNLOAD_PROXY=''` 可直连 GitHub，非空值必须是 HTTPS。该代理只用于内置固定 URL，不改变仓库、提交或 tag。启动前会提示 v1.4.0 安装器将下载并校验 12 个 Release 资产，下载过程可能受网络影响；启动后，发布的 `v1.4.0` bootstrap 仍会自行校验并下载安装器，该内层步骤不保证显示字节进度。
 
 ## 安装模式
 
@@ -96,4 +96,4 @@ sh migrate-components-storage.sh --install-dir /opt/xymedia --yes
 Release 资产包括 `bootstrap.sh`、`install.sh`、`compose.yaml`、`compose.fuse.yaml`、`config.yaml`、`manifest-v1.json`、`SHA256SUMS`、`upgrade-from-bundled.sh`、`remount-fuse.sh`、`uninstall.sh`、`recovery.md` 和 `verify-release.sh`。没有 manifest 的 `.sig` 或 `.pem` 资产。安装器验证 SHA256SUMS、manifest 资产哈希及精确 manifest 标签绑定，但不验证 manifest Cosign provenance，也不把 SHA-256 校验称为发布者验证。
 交互菜单仅在可读写 TTY 中清屏并显示；组件更新和迁移目录提示留空时使用当前工作目录，无法安全规范化时回退 `/opt/xymedia`。长操作显示编号阶段，非交互和日志使用逐行输出，不保证精确下载百分比。
 
-全新重置 helper 独立使用 `sh scripts/reset-fresh-install.sh --install-dir /opt/xymedia --project xymedia`，不要求 `.env` 或 `compose.yaml` 存在。项目名必须匹配 ASCII `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单会在安装目录提示后传入项目名，留空默认值为 `xymedia`。helper 只使用精确 Docker 标签 `com.docker.compose.project=$PROJECT` 发现容器、named volume 和网络，列出全部候选后要求输入 `RESET $PROJECT` 和 `y/Y` 两次确认，再逐项复核标签并停止、非 force 删除容器，删除卷和网络。它不使用 Compose YAML、`docker compose`、`down -v`、prune、名称通配或未由标签发现的资源；没有资源时仍执行相同确认流程。Docker 删除成功后才逐项移动现有 `.env`、Compose、配置及 Release 控制文件到备份目录；`media`、`xiaoya`、`components` 和其他宿主机数据始终保留。取消或失败不会启动 bootstrap。该流程可用于安装失败后 Compose 文件已回滚或删除的目录，且 Docker 数据删除不可逆。
+全新重置 helper 独立使用 `sh scripts/reset-fresh-install.sh --install-dir /opt/xymedia --project xymedia`，不要求 `.env` 或 `compose.yaml` 存在。项目名必须匹配 ASCII `^[a-z0-9][a-z0-9_-]{0,62}$`；菜单会在安装目录提示后传入项目名，留空默认值为 `xymedia`。helper 只使用精确 Docker 标签 `com.docker.compose.project=$PROJECT` 发现容器、named volume 和网络，列出全部候选后要求输入 `1` 确认清理，再输入 `1` 确认永久删除；留空、`2`、EOF 或错误输入都会取消，再逐项复核标签并停止、非 force 删除容器，删除卷和网络。它不使用 Compose YAML、`docker compose`、`down -v`、prune、名称通配或未由标签发现的资源；没有资源时仍执行相同确认流程。Docker 删除成功后才逐项移动现有 `.env`、Compose、配置及 Release 控制文件到备份目录；`media`、`xiaoya`、`components` 和其他宿主机数据始终保留。取消、EOF 或无效确认返回状态码 `3`，错误返回状态码 `2`。当前公开菜单 pin 尚未更新；待固定 pin 更新后，外层菜单应使用 `if ! sh reset-fresh-install.sh ...; then`，从而在取消或失败时安全退出而不启动 bootstrap。该流程可用于安装失败后 Compose 文件已回滚或删除的目录，且 Docker 数据删除不可逆。
