@@ -4,22 +4,15 @@
 
 ## 安装入口
 
-当前稳定版本是 `v1.4.0`。生产环境使用固定 Release bootstrap：
+当前稳定版本是 `v1.4.0`。生产环境在交互式终端中使用公开安装入口，可选择安装/升级应用或更新 Title/TMM 组件：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  'https://gh-proxy.org/https://github.com/iceqi/xymediavault/releases/download/v1.4.0/bootstrap.sh' \
-  | sh -s -- v1.4.0
+  'https://gh-proxy.org/https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh' \
+  | sh
 ```
 
-本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用，或更新 Title/TMM 组件；没有 TTY 时直接执行默认的 `v1.4.0` bootstrap。它只接受一个可选版本参数，并支持 `XYMEDIA_RELEASE`。版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
-
-直接启动交互菜单：
-
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/iceqi/xymediavault/main/scripts/install.sh | sh
-```
+本仓库的 `scripts/install.sh` 是 HTTPS Release bootstrap 转发器，也提供交互式入口菜单。在可读写的交互式终端中不带参数运行时，可选择安装或升级应用，或更新 Title/TMM 组件；没有 TTY、传入版本、设置 `XYMEDIA_RELEASE` 或 `XYMEDIA_COMMAND` 时直接执行默认的 `v1.4.0` bootstrap。它只接受一个可选版本参数；版本必须是 `vX.Y.Z` 或 `vX.Y.Z-beta.N`。
 
 组件更新会先执行不改变 Docker 状态的预检，确认后才停止并重启应用容器。菜单使用固定到 `df4e1ec94fd05e7921c617f32cce83a0224e0fee` 的公开更新器（[固定脚本](https://raw.githubusercontent.com/iceqi/xymediavault/df4e1ec94fd05e7921c617f32cce83a0224e0fee/scripts/update-components.sh)），组件 Release 仍由更新器内置锁和 SHA-256 校验保护。
 
